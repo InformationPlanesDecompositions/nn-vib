@@ -1,5 +1,4 @@
 ## Neural Network Information Research
-Mainly in deep neural networks
 
 ### Papers
 - [Deep Learning and the Information Bottleneck Principle](https://arxiv.org/pdf/1503.02406)
@@ -7,4 +6,3 @@ Mainly in deep neural networks
 - [Compressing Neural Networks using the Variational Information Bottleneck](https://arxiv.org/pdf/1802.10399)
 
 ### Notes
-

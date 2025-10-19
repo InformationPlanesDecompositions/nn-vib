@@ -1,9 +1,9 @@
 import torch
 from torch import nn
-import torch.nn.functional as F
-import numpy as np
-from torch.utils.data import random_split, Dataset, DataLoader
+from torch.utils.data import random_split, DataLoader
 from tqdm import tqdm
+
+from model import MnistCsvDataset, SimpleMNIST
 
 def get_device():
   device = ""
@@ -15,34 +15,6 @@ def get_device():
 
 device = get_device()
 torch.manual_seed(42)
-
-class MnistCsvDataset(Dataset):
-  def __init__(self, filepath):
-    data = np.loadtxt(filepath, delimiter=',', dtype=np.float32)
-    self.labels = torch.tensor(data[:, 0], dtype=torch.long)
-    self.images = torch.tensor(data[:, 1:], dtype=torch.float32)
-
-  def __len__(self):
-    return len(self.labels)
-
-  def __getitem__(self, idx):
-    return self.images[idx].view(1, 28, 28), self.labels[idx]
-
-class SimpleMNIST(nn.Module):
-  def __init__(self):
-    super().__init__()
-    self.fc1 = nn.Linear(784, 256)
-    self.fc2 = nn.Linear(256, 128)
-    self.fc3 = nn.Linear(128, 10)
-
-  def forward(self, x):
-    # flatten from (batch, 1, 28, 28) -> (batch, 784)
-    x = x.view(x.size(0), -1)
-
-    x = F.relu(self.fc1(x))
-    x = F.relu(self.fc2(x))
-    x = self.fc3(x)
-    return x
 
 def train_epoch(model, dataloader, criterion, optimizer, device):
   model.train()
@@ -124,3 +96,5 @@ if __name__ == "__main__":
   optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
   train_model(model, train_loader, test_loader, criterion, optimizer, device, epochs=5)
+
+  torch.save(model.state_dict(), "weights/simple_mnist_mlp.pth")
