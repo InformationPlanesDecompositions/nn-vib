@@ -11,10 +11,13 @@
 - [Deep Variational Information Bottleneck](https://arxiv.org/pdf/1612.00410v7)
 
 - [Compressing Neural Networks using the Variational Information Bottleneck](https://arxiv.org/pdf/1802.10399)
+  - Sota method basically because they compared to all other current methods and basically beat
+    them on compression and accuracy (and the trade off)
 
 - [Nonlinear Information Bottleneck](https://arxiv.org/pdf/1705.02436)
   - Performs slightly better than VIB on MNIST/FasionMNIST
   - Much more clear separation in PCA in NIB than in VIB
+  - But needs O(n^2) compared to VIB O(n)
 
 ### Notes
 - Large weight values cause overly large and complex models prone to over fitting. This is why L1/L2

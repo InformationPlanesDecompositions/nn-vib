@@ -5,11 +5,6 @@ from torch.utils.data import Dataset, random_split, DataLoader
 import numpy as np
 from tqdm import tqdm
 
-"""
-goal:
-  - train mnist using the information bottleneck principle loss function
-"""
-
 def get_device():
   device = ""
   if torch.cuda.is_available(): device = "cuda"
@@ -33,20 +28,18 @@ class MnistCsvDataset(Dataset):
   def __getitem__(self, idx):
     return self.images[idx].view(1, 28, 28), self.labels[idx]
 
-class SimpleMNIST(nn.Module):
-  def __init__(self):
+class LeNet(nn.Module):
+  def __init__(self, input_size=784, hidden1=300, hidden2=100, num_classes=10):
     super().__init__()
-    self.fc1 = nn.Linear(784, 256)
-    self.fc2 = nn.Linear(256, 128)
-    self.fc3 = nn.Linear(128, 10)
+    self.fc1 = nn.Linear(input_size, hidden1)
+    self.fc2 = nn.Linear(hidden1, hidden2)
+    self.fc3 = nn.Linear(hidden2, num_classes)
 
   def forward(self, x):
-    # flatten from (batch, 1, 28, 28) -> (batch, 784)
-    x = x.view(x.size(0), -1)
-
+    x = x.view(x.size(0), -1) # 28x28 to 784
     x = F.relu(self.fc1(x))
     x = F.relu(self.fc2(x))
-    x = self.fc3(x)
+    x = self.fc3(x) # raw logits
     return x
 
 def train_epoch(model, dataloader, criterion, optimizer, device):
@@ -100,7 +93,7 @@ def evaluate(model, dataloader, criterion, device):
   accuracy = 100.0 * correct / total
   return avg_loss, accuracy
 
-def train_model(model, train_loader, test_loader, criterion, optimizer, device, epochs=10):
+def train_model(model, train_loader, test_loader, criterion, optimizer, device, epochs):
   model.to(device)
 
   for epoch in range(epochs):
@@ -123,11 +116,12 @@ if __name__ == "__main__":
   train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
   test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False)
 
-  model = SimpleMNIST()
-  lr = 1e-3
+  model = LeNet()
+  learning_rate = 1e-4
+  epochs = 10 # 20-50 for lenet
   criterion = nn.CrossEntropyLoss()
-  optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+  optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
-  train_model(model, train_loader, test_loader, criterion, optimizer, device, epochs=5)
+  train_model(model, train_loader, test_loader, criterion, optimizer, device, epochs)
 
   torch.save(model.state_dict(), "../weights/simple_mnist_mlp.pth")
