@@ -5,6 +5,11 @@ from torch.utils.data import Dataset, random_split, DataLoader
 import numpy as np
 from tqdm import tqdm
 
+"""
+goal:
+  - train mnist using the information bottleneck principle loss function
+"""
+
 def get_device():
   device = ""
   if torch.cuda.is_available(): device = "cuda"
