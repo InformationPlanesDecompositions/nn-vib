@@ -2,10 +2,8 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 from torch.utils.data import Dataset, random_split, DataLoader
-import torch.nn.utils.prune as prune
 import numpy as np
 from tqdm import tqdm
-import copy
 from testing_utils import get_device
 
 torch.manual_seed(42)
@@ -85,7 +83,7 @@ def train_epoch(model, dataloader, optimizer, device, beta: float):
   correct = 0
   total = 0
 
-  for X, Y in (tq := tqdm(dataloader, desc="Training", leave=False)):
+  for X, Y in (tq := tqdm(dataloader, desc="training", leave=False)):
     X, Y = X.to(device), Y.to(device)
 
     optimizer.zero_grad()
@@ -147,23 +145,23 @@ def train_model(
   model.to(device)
 
   for epoch in range(epochs):
-    print(f"Epoch [{epoch+1}/{epochs}]")
+    print(f"epoch [{epoch+1}/{epochs}]")
 
     train_loss, train_acc = train_epoch(model, train_loader, optimizer, device, beta=beta)
 
     test_loss, test_acc = evaluate(model, test_loader, device, beta=beta)
 
-    print(f"Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.2f}%")
-    print(f"Test  Loss: {test_loss:.4f} | Test  Acc: {test_acc:.2f}%\n")
+    print(f"train loss: {train_loss:.4f} | train acc: {train_acc:.2f}%")
+    print(f"test  loss: {test_loss:.4f} | test  acc: {test_acc:.2f}%\n")
+
+train_test_split = 0.8
+batch_size = 64
+z_dim = 100
+beta = 1e-2 # bigger: more compression
+learning_rate = 1e-4
+epochs = 10
 
 if __name__ == "__main__":
-  train_test_split = 0.8
-  batch_size = 64
-  z_dim = 100
-  beta = 1e-3
-  learning_rate = 1e-4
-  epochs = 7
-
   dataset = MnistCsvDataset("../data/mnist_data.csv")
   train_size = int(train_test_split * len(dataset))
   test_size = len(dataset) - train_size
@@ -180,14 +178,3 @@ if __name__ == "__main__":
   train_model(model, train_loader, test_loader, optimizer, device, epochs, beta=beta)
 
   torch.save(model.state_dict(), "../weights/vib_lenet_300_100_mnist.pth")
-
-  # -------------
-
-  prune_ps = [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6]
-  original_model = copy.deepcopy(model)
-
-  for prune_p in prune_ps:
-    pruned_model = copy.deepcopy(original_model)
-    prune.l1_unstructured(pruned_model.fc_mu, name="weight", amount=prune_p)
-    test_loss, test_acc = evaluate(pruned_model, test_loader, device, beta=beta)
-    print(f"Pruned: {prune_p*100:.2f} -> Test  Loss: {test_loss:.4f} | Test  Acc: {test_acc:.2f}%")
