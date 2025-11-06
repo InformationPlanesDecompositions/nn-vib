@@ -4,7 +4,8 @@ import torch.nn.utils.prune as prune
 from torch.utils.data import random_split, DataLoader
 from inspect_weights import load_weights
 from vib_lenet_300_100_mnist import (
-    VIBLeNet, MnistCsvDataset, train_test_split, batch_size, beta, evaluate
+    VIBLeNet, MnistCsvDataset, train_test_split,
+    batch_size, beta, z_dim, evaluate
 )
 from testing_utils import get_device
 
@@ -13,7 +14,7 @@ device = get_device()
 print(f"using device: {device}")
 
 if __name__ == "__main__":
-  model = VIBLeNet().to(device)
+  model = VIBLeNet(z_dim=z_dim).to(device)
   weights = load_weights("../weights/vib_lenet_300_100_mnist.pth")
   model.load_state_dict(weights)
 

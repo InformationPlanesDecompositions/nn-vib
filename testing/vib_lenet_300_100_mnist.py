@@ -25,10 +25,10 @@ class MnistCsvDataset(Dataset):
 class VIBLeNet(nn.Module):
   def __init__(
       self,
+      z_dim: int,
       input_shape: int=784,
       hidden1: int=300,
       hidden2: int=100,
-      z_dim: int=100,
       output_shape: int=10
   ):
     super().__init__()
@@ -56,6 +56,10 @@ class VIBLeNet(nn.Module):
     return self.fc_mu(x), F.softplus(self.fc_std(x)-5, beta=1)
 
   def reparameterize(self, mu, std):
+    """
+    mu: mean u
+    std: standard deviation sigma
+    """
     eps = torch.randn_like(std)
     return mu + std*eps
 
@@ -72,6 +76,9 @@ def loss_function(y_pred, y, mu, std, beta):
   y : [batch_size,10]
   mu : [batch_size,z_dim]
   std: [batch_size,z_dim]
+
+  CE: lower bound on I(Z;Y) (prediction)
+  KL: upper bound on I(Z;X) (compression)
   """
   CE = F.cross_entropy(y_pred, y, reduction="sum")
   KL = 0.5 * torch.sum(mu.pow(2) + std.pow(2) - 2*std.log() - 1)
@@ -156,7 +163,7 @@ def train_model(
 
 train_test_split = 0.8
 batch_size = 64
-z_dim = 100
+z_dim = 25
 beta = 1e-2 # bigger: more compression
 learning_rate = 1e-4
 epochs = 10
