@@ -5,19 +5,14 @@ from torch.utils.data import Dataset, random_split, DataLoader
 import numpy as np
 from tqdm import tqdm
 
-def get_device():
-  device = ""
-  if torch.cuda.is_available(): device = "cuda"
-  elif torch.mps.is_available(): device = "mps"
-  else: device = "cpu"
-  print(f"Using device: {device}")
-  return torch.device(device)
+from testing_utils import get_device
 
-device = get_device()
 torch.manual_seed(42)
+device = get_device()
+print(f"using device: {device}")
 
 class MnistCsvDataset(Dataset):
-  def __init__(self, filepath):
+  def __init__(self, filepath: str):
     data = np.loadtxt(filepath, delimiter=',', dtype=np.float32)
     self.labels = torch.tensor(data[:, 0], dtype=torch.long)
     self.images = torch.tensor(data[:, 1:], dtype=torch.float32)
@@ -25,30 +20,34 @@ class MnistCsvDataset(Dataset):
   def __len__(self):
     return len(self.labels)
 
-  def __getitem__(self, idx):
+  def __getitem__(self, idx: int):
     return self.images[idx].view(1, 28, 28), self.labels[idx]
 
 class LeNet(nn.Module):
-  def __init__(self, input_size=784, hidden1=300, hidden2=100, num_classes=10):
+  def __init__(self, input_size: int=784, hidden1: int=300, hidden2: int=100, num_classes: int=10):
     super().__init__()
     self.fc1 = nn.Linear(input_size, hidden1)
     self.fc2 = nn.Linear(hidden1, hidden2)
     self.fc3 = nn.Linear(hidden2, num_classes)
 
-  def forward(self, x):
+  def forward(self, x: torch.Tensor):
     x = x.view(x.size(0), -1) # 28x28 to 784
     x = F.relu(self.fc1(x))
     x = F.relu(self.fc2(x))
-    x = self.fc3(x) # raw logits
+    x = self.fc3(x) # (32,10)
+    #print(f"softmax: {F.softmax(x)}")
+    #print(f"log softmax: {F.log_softmax(x)}")
+    #exit(1)
+    x = F.log_softmax(x, dim=1)
     return x
 
-def train_epoch(model, dataloader, criterion, optimizer, device):
+def train_epoch(model, dataloader: DataLoader, criterion, optimizer, device):
   model.train()
   running_loss = 0.0
   correct = 0
   total = 0
 
-  for images, labels in (tq := tqdm(dataloader, desc="Training", leave=False)):
+  for images, labels in (tq := tqdm(dataloader, desc="training", leave=False)):
     images, labels = images.to(device), labels.to(device)
 
     outputs = model(images)
@@ -93,17 +92,17 @@ def evaluate(model, dataloader, criterion, device):
   accuracy = 100.0 * correct / total
   return avg_loss, accuracy
 
-def train_model(model, train_loader, test_loader, criterion, optimizer, device, epochs):
+def train_model(model, train_loader, test_loader: DataLoader, criterion, optimizer, device, epochs: int=5):
   model.to(device)
 
   for epoch in range(epochs):
-    print(f"Epoch [{epoch+1}/{epochs}]")
+    print(f"epoch [{epoch+1}/{epochs}]")
 
     train_loss, train_acc = train_epoch(model, train_loader, criterion, optimizer, device)
     test_loss, test_acc = evaluate(model, test_loader, criterion, device)
 
-    print(f"Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.2f}%")
-    print(f"Test  Loss: {test_loss:.4f} | Test  Acc: {test_acc:.2f}%\n")
+    print(f"train loss: {train_loss:.4f} | train acc: {train_acc:.2f}%")
+    print(f"test  loss: {test_loss:.4f} | test  acc: {test_acc:.2f}%\n")
 
 if __name__ == "__main__":
   dataset = MnistCsvDataset("../data/mnist_data.csv")
@@ -114,14 +113,13 @@ if __name__ == "__main__":
   train_dataset, test_dataset = random_split(dataset, [train_size, test_size])
 
   train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
-  test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False)
+  test_loader = DataLoader(test_dataset, batch_size=32, shuffle=True)
 
   model = LeNet()
   learning_rate = 1e-4
-  epochs = 10 # 20-50 for lenet
-  criterion = nn.CrossEntropyLoss()
+  criterion = nn.NLLLoss()
   optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
-  train_model(model, train_loader, test_loader, criterion, optimizer, device, epochs)
+  train_model(model, train_loader, test_loader, criterion, optimizer, device)
 
-  torch.save(model.state_dict(), "../weights/simple_mnist_mlp.pth")
+  torch.save(model.state_dict(), "../weights/lenet_300_100_mnist.pth")
