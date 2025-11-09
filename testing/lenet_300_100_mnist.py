@@ -2,8 +2,11 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 from torch.utils.data import Dataset, random_split, DataLoader
+import torch.nn.utils.prune as prune
 import numpy as np
 from tqdm import tqdm
+import copy
+import matplotlib.pyplot as plt
 
 from testing_utils import get_device
 
@@ -123,3 +126,35 @@ if __name__ == "__main__":
   train_model(model, train_loader, test_loader, criterion, optimizer, device)
 
   torch.save(model.state_dict(), "../weights/lenet_300_100_mnist.pth")
+
+  original_model = copy.deepcopy(model)
+
+  prune_ps = [0.0, 0.05, 0.1, 0.15, 0.20, 0.25, 0.3, 0.35, 0.40]
+
+  weight_layers = [
+      ("fc1", "weight"),
+      ("fc2", "weight"),
+      ("fc3", "weight"),
+  ]
+
+  acc_list = []
+  for prune_p in prune_ps:
+    pruned_model = copy.deepcopy(original_model)
+    for layer_name, param_name in weight_layers:
+      module = getattr(pruned_model, layer_name, None)
+      if module is None:
+          print(f"Warning: Layer '{layer_name}' not found in the model")
+          exit(0)
+      prune.l1_unstructured(module, name=param_name, amount=prune_p)
+
+    test_loss, test_acc = evaluate(pruned_model, test_loader, criterion, device)
+    acc_list.append(test_acc)
+    print(f"pruned: {prune_p*100:.1f}% -> test loss: {test_loss:.4f} | test acc: {test_acc:.2f}%")
+
+  plt.figure(figsize=(10, 6))
+  plt.plot(prune_ps, acc_list, marker='o', linestyle='-', color='b')
+
+  plt.title('Accuracy pruned'); plt.xlabel('Pruned %'); plt.ylabel('Accuracy')
+
+  plt.savefig("../plots/lenet_300_100_mnist_pruned_acc.png", dpi=300, bbox_inches='tight')
+  plt.close()
