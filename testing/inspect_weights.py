@@ -1,11 +1,12 @@
 import torch
 
-def load_weights(filepath):
+def load_weights(filepath, verbose=True):
   weights = torch.load(filepath, map_location='cpu')
-  print(f"loaded object type: {type(weights)}")
+  if verbose: print(f"loaded object type: {type(weights)}")
   if isinstance(weights, dict):
-    print("keys in the weights file:")
-    for key in weights.keys(): print(f"- {key} with shape {weights[key].shape}")
+    if verbose: print("keys in the weights file:")
+    for key in weights.keys():
+      if verbose: print(f"- {key} with shape {weights[key].shape}")
 
   return weights
 
