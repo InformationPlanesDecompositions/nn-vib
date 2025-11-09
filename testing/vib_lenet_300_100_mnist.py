@@ -4,6 +4,8 @@ from torch import nn
 from torch.utils.data import Dataset, random_split, DataLoader
 import numpy as np
 from tqdm import tqdm
+import matplotlib.pyplot as plt
+import json
 from testing_utils import get_device
 
 torch.manual_seed(42)
@@ -161,12 +163,13 @@ def train_model(
     print(f"train loss: {train_loss:.4f} | train acc: {train_acc:.2f}%")
     print(f"test  loss: {test_loss:.4f} | test  acc: {test_acc:.2f}%\n")
 
+betas = [0.3, 0.25, 0.2, 0.15, 0.1, 0.05, 0.01]
+#beta = 1e-2 # bigger: more compression
 train_test_split = 0.8
 batch_size = 64
-z_dim = 25
-beta = 1e-2 # bigger: more compression
+z_dim = 30
 learning_rate = 1e-4
-epochs = 10
+epochs = 25
 
 if __name__ == "__main__":
   dataset = MnistCsvDataset("../data/mnist_data.csv")
@@ -179,9 +182,27 @@ if __name__ == "__main__":
   train_loader = DataLoader(train_dataset, batch_size, shuffle=True)
   test_loader = DataLoader(test_dataset, batch_size, shuffle=True)
 
-  model = VIBLeNet(z_dim=z_dim)
-  optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+  acc_list = []
 
-  train_model(model, train_loader, test_loader, optimizer, device, epochs, beta=beta)
+  for b in betas:
+    model = VIBLeNet(z_dim=z_dim)
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
-  torch.save(model.state_dict(), "../weights/vib_lenet_300_100_mnist.pth")
+    train_model(model, train_loader, test_loader, optimizer, device, epochs, beta=b)
+    avg_loss, acc = evaluate(model, test_loader, device, b)
+    acc_list.append(acc)
+    torch.save(model.state_dict(), f"../weights/vib_lenet_300_100_mnist_{b}.pth")
+
+  print(acc_list)
+
+  plt.figure(figsize=(10, 6))
+  plt.plot(betas, acc_list, marker='o', linestyle='-', color='b')
+  plt.xscale('log')
+
+  plt.title('Accuracy vs beta (larger beta = higher compression)')
+  plt.xlabel('Beta'); plt.ylabel('Accuracy')
+  plt.savefig("../plots/vib_lenet_300_100_mnist_beta_vs_acc.png", dpi=300, bbox_inches='tight')
+  plt.close()
+
+  with open('../weights/accuracy_data.json', 'w') as json_file:
+    json.dump({"betas": betas, "acc_list": acc_list}, json_file, indent=2)

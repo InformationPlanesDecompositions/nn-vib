@@ -1,6 +1,6 @@
 .DS_Store
 data/
 .venv/
-weights/
+weights/*.pth
 __pycache__/
 .ipynb_checkpoints/

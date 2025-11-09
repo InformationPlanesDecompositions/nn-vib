@@ -33,3 +33,4 @@
   down to a smallest possible size that fits more perfectly to the problem.
 
 - Is the pruneability a good measure for over-parameterization of a neural network?
+- Measure the training loss boundries
