@@ -27,12 +27,12 @@ def plot_x_y(
 
   if point_labels:
     for x, y in zip(xs, ys1):
-      ax.text(x, y, f"({x:.4f}, {y:.2f})", fontsize=8,
+      ax.text(x, y, f'({x:.4f}, {y:.2f})', fontsize=8,
               verticalalignment='bottom', horizontalalignment='right')
 
     if ys2:
       for x, y in zip(xs, ys2):
-        ax.text(x, y, f"({x:.4f}, {y:.2f})", fontsize=8,
+        ax.text(x, y, f'({x:.4f}, {y:.2f})', fontsize=8,
                 verticalalignment='top', horizontalalignment='left')
 
   ax.legend()

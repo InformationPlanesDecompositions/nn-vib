@@ -11,7 +11,7 @@ from msc.plotting import plot_x_y
 
 torch.manual_seed(42)
 device = get_device()
-print(f"using device: {device}")
+print(f'using device: {device}')
 
 class MnistCsvDataset(Dataset):
   def __init__(self, filepath: str):
@@ -45,40 +45,47 @@ class VIBLeNet(nn.Module):
     )
 
     self.fc_mu = nn.Linear(hidden2, z_dim)
-    self.fc_std = nn.Linear(hidden2, z_dim)
+    self.fc_logvar = nn.Linear(hidden2, z_dim)
 
     self.decoder = nn.Linear(z_dim, output_shape)
 
-  def encode(self, x):
-    """
-    x: [batch_size,784]
-    """
-    x = self.encoder(x)
-    return self.fc_mu(x), F.softplus(self.fc_std(x)-5, beta=1)
-
-  def reparameterize(self, mu, std):
-    """
-    mu: mean u
-    std: standard deviation sigma
-    """
-    eps = torch.randn_like(std)
-    return mu + std*eps
+  def reparameterize(self, mu, logvar):
+    if mu.requires_grad:
+      std = torch.exp(0.5 * torch.clamp(logvar, -10, 10))
+      eps = torch.randn_like(std)
+      return mu + eps * std
+    else:
+      return mu
 
   def forward(self, x):
     x_flat = x.view(x.size(0), -1)
-    mu, std = self.encode(x_flat)
-    z = self.reparameterize(mu, std)
-    return self.decoder(z), mu, std
+    h = self.encoder(x_flat)
+    mu = self.fc_mu(h)
+    logvar = self.fc_logvar(h)
+    z = self.reparameterize(mu, logvar)
+    logits = self.decoder(z)
+    return logits, mu, logvar
 
-def loss_function(y_pred, y, mu, std, beta, eps=1e-8):
-  """
-  CE: lower bound on I(Z;Y) (prediction)
-  KL: upper bound on I(Z;X) (compression)
+def vib_loss(
+    logits: torch.Tensor,
+    y: torch.Tensor,
+    mu: torch.Tensor,
+    logvar: torch.Tensor,
+    beta: float=1e-3,
+) -> torch.Tensor:
+  '''
+  ce: lower bound on I(Z;Y) (prediction)
+  kl: upper bound on I(Z;X) (compression)
   bigger beta = more compression
-  """
-  CE = F.cross_entropy(y_pred, y, reduction="sum")
-  KL = 0.5 * torch.sum(mu.pow(2) + std.pow(2) - 2 * (std + eps).log() - 1)
-  return (CE + beta*KL) / y.size(0), KL, CE
+  '''
+
+  ce = F.cross_entropy(logits, y, reduction='mean')
+
+  logvar = torch.clamp(logvar, min=-10, max=10)
+  kl_per_sample = 0.5 * torch.sum(torch.exp(logvar) + mu**2 - 1.0 - logvar, dim=1)
+  kl = kl_per_sample.mean()
+
+  return ce + beta * kl
 
 def train_epoch(model, dataloader, optimizer, device, beta: float):
   model.train()
@@ -86,27 +93,26 @@ def train_epoch(model, dataloader, optimizer, device, beta: float):
   correct = 0
   total = 0
 
-  for X, Y in (tq := tqdm(dataloader, desc="training", leave=False)):
-    X, Y = X.to(device), Y.to(device)
+  for x, y in (t := tqdm(dataloader, desc='training', leave=False)):
+    x, y = x.to(device), y.to(device)
 
     optimizer.zero_grad()
 
-    log_probs, mu, std = model(X)
-    loss, KL, CE = loss_function(log_probs, Y, mu, std, beta)
+    logits, mu, logvar = model(x)
+    loss = vib_loss(logits, y, mu, logvar, beta)
     loss.backward()
     optimizer.step()
 
-    # accumulate (note multiply nll by batch size to match previous running_loss scheme)
-    bs = X.size(0)
+    bs = x.size(0)
     running_loss += loss.item() * bs
 
-    _, preds = torch.max(log_probs, 1)
-    correct += (preds == Y).sum().item()
+    preds = logits.argmax(dim=1)
+    correct += (preds == y).sum().item()
     total += bs
 
-    tq.set_postfix({
-      "loss": f"{loss.item():.4f}",
-      "acc": f"{100.0 * correct / total:.2f}"
+    t.set_postfix({
+      'loss': f'{loss.item():.3f}',
+      'acc': f'{100.0 * correct / total:.2f}'
     })
 
   avg_loss = running_loss / total
@@ -118,59 +124,28 @@ def evaluate(model, dataloader, device, beta: float):
   running_loss = 0.0
   correct = 0
   total = 0
-  running_KL = 0.0
-  running_CE = 0.0
 
   with torch.no_grad():
-    for images, labels in dataloader:
-      images, labels = images.to(device), labels.to(device)
-      log_probs, mu, std = model(images)
-      loss, KL, CE = loss_function(log_probs, labels, mu, std, beta)
+    for x, y in dataloader:
+      x, y = x.to(device), y.to(device)
+      logits, mu, logvar = model(x)
+      loss = vib_loss(logits, y, mu, logvar, beta)
 
-      bs = images.size(0)
+      bs = x.size(0)
       running_loss += loss.item() * bs
 
-      _, preds = torch.max(log_probs, 1)
-      correct += (preds == labels).sum().item()
+      preds = logits.argmax(dim=1)
+      correct += (preds == y).sum().item()
       total += bs
-      running_KL += KL
-      running_CE += CE
 
   avg_loss = running_loss / total
   accuracy = 100.0 * correct / total
-  average_KL = running_KL / total
-  average_CE = running_CE / total
-  return avg_loss, accuracy, average_KL, average_CE
+  return avg_loss, accuracy
 
-def train_model(
-    model,
-    train_loader: DataLoader,
-    test_loader: DataLoader,
-    optimizer,
-    scheduler,
-    device,
-    epochs: int,
-    beta_func
-):
-  model.to(device)
-  test_stats = []
-  for epoch in range(epochs):
-    print(f"epoch [{epoch+1}/{epochs}], beta: {beta_func(epoch):.3f}")
-
-    train_loss, train_acc = train_epoch(model, train_loader, optimizer, device, beta_func(epoch))
-    test_loss, test_acc, avg_KL, avg_CE = evaluate(model, test_loader, device, beta_func(epoch))
-
-    print(f"train loss: {train_loss:.4f} | train acc: {train_acc:.2f}%")
-    print(f"test  loss: {test_loss:.4f} | test  acc: {test_acc:.2f}%\n")
-
-    test_stats.append((epoch, beta_func(epoch), test_loss, test_acc))
-
-    scheduler.step()
-  return test_stats
-
-z_dim = 10
+z_dim = 16
 base_beta = 1e-4
 max_beta   = 2e-1
+
 batch_size = 256
 train_test_split = 0.8
 learning_rate = 1e-3
@@ -178,46 +153,44 @@ weight_decay=1e-5
 warmup_epochs = 18
 epochs = 60
 
-def get_current_beta(epoch):
+def curr_beta(epoch):
   if epoch < warmup_epochs:
     return base_beta + (max_beta - base_beta) * (epoch / warmup_epochs)
   else: return max_beta
 
-if __name__ == "__main__":
-  dataset = MnistCsvDataset("../data/mnist_data.csv")
+if __name__ == '__main__':
+  dataset = MnistCsvDataset('../data/mnist_data.csv')
   train_size = int(train_test_split * len(dataset))
   test_size = len(dataset) - train_size
-  print(f"train_size: {train_size}, test_size: {test_size}")
-
+  print(f'train_size: {train_size}, test_size: {test_size}')
   train_dataset, test_dataset = random_split(dataset, [train_size, test_size])
-
   train_loader = DataLoader(train_dataset, batch_size, shuffle=True)
   test_loader = DataLoader(test_dataset, batch_size, shuffle=True)
 
-  model = VIBLeNet(z_dim=z_dim)
+  model = VIBLeNet(z_dim=z_dim).to(device)
   optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
   scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
 
-  test_stats = train_model(
-      model,
-      train_loader,
-      test_loader,
-      optimizer,
-      scheduler,
-      device,
-      epochs,
-      get_current_beta
-  )
+  test_stats = []
+  for epoch in range(epochs):
+    print(f'epoch {epoch}/{epochs}')
+    train_loss, train_acc = train_epoch(
+        model, train_loader, optimizer, device, curr_beta(epoch)
+    )
+    test_loss, test_acc = evaluate(
+        model, test_loader, device, curr_beta(epoch)
+    )
+    print(f'train loss: {train_loss:.4f} | train acc: {train_acc:.2f}%')
+    print(f'test  loss: {test_loss:.4f} | test  acc: {test_acc:.2f}%\n')
+    test_stats.append((epoch, curr_beta(epoch), test_loss, test_acc))
 
-  torch.save(model.state_dict(), f"../weights/vib_lenet_300_100_mnist.pth")
+    scheduler.step()
+
+  torch.save(model.state_dict(), f'../weights/vib_lenet_300_100_mnist.pth')
 
   for (epoch, beta, tloss, tacc) in test_stats:
     print(f'epoch {epoch}: beta {beta:.3f}, loss {tloss:.3f}, acc {tacc:.3f}')
 
   #avg_loss, acc = evaluate(model, test_loader, device, max_beta)
-
   #fig, ax = plot_x_y(betas, acc_list, None, 'β', 'acc', 'accuracy', None, False, True)
   #fig.savefig('../plots/vib_lenet_300_100_mnist_beta_vs_acc.png', dpi=300, bbox_inches='tight')
-
-  #with open('../weights/accuracy_data.json', 'w') as json_file:
-  #  json.dump({'betas': betas, 'acc_list': acc_list}, json_file, indent=2)
