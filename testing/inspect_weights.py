@@ -11,13 +11,6 @@ def load_weights(filepath, verbose=True):
   return weights
 
 if __name__ == "__main__":
-  torch.set_printoptions(profile="full")
-
-  weights = load_weights("../weights/lenet_300_100_mnist.pth")
+  #torch.set_printoptions(profile="full")
+  weights = load_weights("../weights/vib_lenet_300_100_mnist.pth")
   #print(weights)
-
-  #fc_mu_weights = weights["fc_mu.weight"]
-  #fc_std_weights = weights["fc_std.weight"]
-
-  #print(f"fc mu weights: {fc_mu_weights}")
-  #print(f"fc std weights: {fc_std_weights}")

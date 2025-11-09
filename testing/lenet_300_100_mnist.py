@@ -38,9 +38,6 @@ class LeNet(nn.Module):
     x = F.relu(self.fc1(x))
     x = F.relu(self.fc2(x))
     x = self.fc3(x) # (32,10)
-    #print(f"softmax: {F.softmax(x)}")
-    #print(f"log softmax: {F.log_softmax(x)}")
-    #exit(1)
     x = F.log_softmax(x, dim=1)
     return x
 
@@ -95,7 +92,7 @@ def evaluate(model, dataloader, criterion, device):
   accuracy = 100.0 * correct / total
   return avg_loss, accuracy
 
-def train_model(model, train_loader, test_loader: DataLoader, criterion, optimizer, device, epochs: int=5):
+def train_model(model, train_loader, test_loader: DataLoader, criterion, optimizer, device, epochs):
   model.to(device)
 
   for epoch in range(epochs):
@@ -115,26 +112,27 @@ if __name__ == "__main__":
 
   train_dataset, test_dataset = random_split(dataset, [train_size, test_size])
 
-  train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
+  train_loader = DataLoader(train_dataset, batch_size=256, shuffle=True)
   test_loader = DataLoader(test_dataset, batch_size=32, shuffle=True)
 
   model = LeNet()
+  epochs = 25
   learning_rate = 1e-4
   criterion = nn.NLLLoss()
   optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
-  train_model(model, train_loader, test_loader, criterion, optimizer, device)
+  train_model(model, train_loader, test_loader, criterion, optimizer, device, epochs)
 
   torch.save(model.state_dict(), "../weights/lenet_300_100_mnist.pth")
 
   original_model = copy.deepcopy(model)
 
-  prune_ps = [0.0, 0.05, 0.1, 0.15, 0.20, 0.25, 0.3, 0.35, 0.40]
+  prune_ps = [0.0, 0.05, 0.1, 0.15, 0.20, 0.25, 0.3, 0.40, 0.5, 0.6, 0.7, 0.8]
 
   weight_layers = [
       ("fc1", "weight"),
       ("fc2", "weight"),
-      ("fc3", "weight"),
+      #("fc3", "weight"),
   ]
 
   acc_list = []

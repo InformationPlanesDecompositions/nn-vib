@@ -7,6 +7,7 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 import json
 from testing_utils import get_device
+from msc.plotting import plot_x_y
 
 torch.manual_seed(42)
 device = get_device()
@@ -17,10 +18,8 @@ class MnistCsvDataset(Dataset):
     data = np.loadtxt(filepath, delimiter=',', dtype=np.float32)
     self.labels = torch.tensor(data[:, 0], dtype=torch.long)
     self.images = torch.tensor(data[:, 1:], dtype=torch.float32)
-
   def __len__(self):
     return len(self.labels)
-
   def __getitem__(self, idx: int):
     return self.images[idx].view(1, 28, 28), self.labels[idx]
 
@@ -71,20 +70,15 @@ class VIBLeNet(nn.Module):
     z = self.reparameterize(mu, std)
     return self.decoder(z), mu, std
 
-# kl-diverg?
-def loss_function(y_pred, y, mu, std, beta):
+def loss_function(y_pred, y, mu, std, beta, eps=1e-8):
   """
-  y_pred : [batch_size,10]
-  y : [batch_size,10]
-  mu : [batch_size,z_dim]
-  std: [batch_size,z_dim]
-
   CE: lower bound on I(Z;Y) (prediction)
   KL: upper bound on I(Z;X) (compression)
+  bigger beta = more compression
   """
   CE = F.cross_entropy(y_pred, y, reduction="sum")
-  KL = 0.5 * torch.sum(mu.pow(2) + std.pow(2) - 2*std.log() - 1)
-  return (beta*KL + CE) / y.size(0)
+  KL = 0.5 * torch.sum(mu.pow(2) + std.pow(2) - 2 * (std + eps).log() - 1)
+  return (CE + beta*KL) / y.size(0), KL, CE
 
 def train_epoch(model, dataloader, optimizer, device, beta: float):
   model.train()
@@ -98,7 +92,7 @@ def train_epoch(model, dataloader, optimizer, device, beta: float):
     optimizer.zero_grad()
 
     log_probs, mu, std = model(X)
-    loss = loss_function(log_probs, Y, mu, std, beta)
+    loss, KL, CE = loss_function(log_probs, Y, mu, std, beta)
     loss.backward()
     optimizer.step()
 
@@ -124,12 +118,14 @@ def evaluate(model, dataloader, device, beta: float):
   running_loss = 0.0
   correct = 0
   total = 0
+  running_KL = 0.0
+  running_CE = 0.0
 
   with torch.no_grad():
     for images, labels in dataloader:
       images, labels = images.to(device), labels.to(device)
       log_probs, mu, std = model(images)
-      loss = loss_function(log_probs, labels, mu, std, beta)
+      loss, KL, CE = loss_function(log_probs, labels, mu, std, beta)
 
       bs = images.size(0)
       running_loss += loss.item() * bs
@@ -137,39 +133,55 @@ def evaluate(model, dataloader, device, beta: float):
       _, preds = torch.max(log_probs, 1)
       correct += (preds == labels).sum().item()
       total += bs
+      running_KL += KL
+      running_CE += CE
 
   avg_loss = running_loss / total
   accuracy = 100.0 * correct / total
-  return avg_loss, accuracy
+  average_KL = running_KL / total
+  average_CE = running_CE / total
+  return avg_loss, accuracy, average_KL, average_CE
 
 def train_model(
     model,
     train_loader: DataLoader,
     test_loader: DataLoader,
     optimizer,
+    scheduler,
     device,
     epochs: int,
-    beta: float=1.0
+    beta_func
 ):
   model.to(device)
-
+  test_stats = []
   for epoch in range(epochs):
-    print(f"epoch [{epoch+1}/{epochs}]")
+    print(f"epoch [{epoch+1}/{epochs}], beta: {beta_func(epoch):.3f}")
 
-    train_loss, train_acc = train_epoch(model, train_loader, optimizer, device, beta=beta)
-
-    test_loss, test_acc = evaluate(model, test_loader, device, beta=beta)
+    train_loss, train_acc = train_epoch(model, train_loader, optimizer, device, beta_func(epoch))
+    test_loss, test_acc, avg_KL, avg_CE = evaluate(model, test_loader, device, beta_func(epoch))
 
     print(f"train loss: {train_loss:.4f} | train acc: {train_acc:.2f}%")
     print(f"test  loss: {test_loss:.4f} | test  acc: {test_acc:.2f}%\n")
 
-betas = [0.3, 0.25, 0.2, 0.15, 0.1, 0.05, 0.01]
-#beta = 1e-2 # bigger: more compression
+    test_stats.append((epoch, beta_func(epoch), test_loss, test_acc))
+
+    scheduler.step()
+  return test_stats
+
+z_dim = 10
+base_beta = 1e-4
+max_beta   = 2e-1
+batch_size = 256
 train_test_split = 0.8
-batch_size = 64
-z_dim = 30
-learning_rate = 1e-4
-epochs = 25
+learning_rate = 1e-3
+weight_decay=1e-5
+warmup_epochs = 18
+epochs = 60
+
+def get_current_beta(epoch):
+  if epoch < warmup_epochs:
+    return base_beta + (max_beta - base_beta) * (epoch / warmup_epochs)
+  else: return max_beta
 
 if __name__ == "__main__":
   dataset = MnistCsvDataset("../data/mnist_data.csv")
@@ -182,27 +194,30 @@ if __name__ == "__main__":
   train_loader = DataLoader(train_dataset, batch_size, shuffle=True)
   test_loader = DataLoader(test_dataset, batch_size, shuffle=True)
 
-  acc_list = []
+  model = VIBLeNet(z_dim=z_dim)
+  optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
+  scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
 
-  for b in betas:
-    model = VIBLeNet(z_dim=z_dim)
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+  test_stats = train_model(
+      model,
+      train_loader,
+      test_loader,
+      optimizer,
+      scheduler,
+      device,
+      epochs,
+      get_current_beta
+  )
 
-    train_model(model, train_loader, test_loader, optimizer, device, epochs, beta=b)
-    avg_loss, acc = evaluate(model, test_loader, device, b)
-    acc_list.append(acc)
-    torch.save(model.state_dict(), f"../weights/vib_lenet_300_100_mnist_{b}.pth")
+  torch.save(model.state_dict(), f"../weights/vib_lenet_300_100_mnist.pth")
 
-  print(acc_list)
+  for (epoch, beta, tloss, tacc) in test_stats:
+    print(f'epoch {epoch}: beta {beta:.3f}, loss {tloss:.3f}, acc {tacc:.3f}')
 
-  plt.figure(figsize=(10, 6))
-  plt.plot(betas, acc_list, marker='o', linestyle='-', color='b')
-  plt.xscale('log')
+  #avg_loss, acc = evaluate(model, test_loader, device, max_beta)
 
-  plt.title('Accuracy vs beta (larger beta = higher compression)')
-  plt.xlabel('Beta'); plt.ylabel('Accuracy')
-  plt.savefig("../plots/vib_lenet_300_100_mnist_beta_vs_acc.png", dpi=300, bbox_inches='tight')
-  plt.close()
+  #fig, ax = plot_x_y(betas, acc_list, None, 'β', 'acc', 'accuracy', None, False, True)
+  #fig.savefig('../plots/vib_lenet_300_100_mnist_beta_vs_acc.png', dpi=300, bbox_inches='tight')
 
-  with open('../weights/accuracy_data.json', 'w') as json_file:
-    json.dump({"betas": betas, "acc_list": acc_list}, json_file, indent=2)
+  #with open('../weights/accuracy_data.json', 'w') as json_file:
+  #  json.dump({'betas': betas, 'acc_list': acc_list}, json_file, indent=2)
