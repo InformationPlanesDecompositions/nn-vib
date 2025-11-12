@@ -7,9 +7,8 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 import json
 from testing_utils import get_device
-from msc.plotting import plot_x_y
 
-torch.manual_seed(42)
+torch.manual_seed(42) # TODO: TEST ON VARIOUS DIFF SEEDS (for statistical sig)
 device = get_device()
 print(f'using device: {device}')
 
@@ -18,8 +17,10 @@ class MnistCsvDataset(Dataset):
     data = np.loadtxt(filepath, delimiter=',', dtype=np.float32)
     self.labels = torch.tensor(data[:, 0], dtype=torch.long)
     self.images = torch.tensor(data[:, 1:], dtype=torch.float32)
+
   def __len__(self):
     return len(self.labels)
+
   def __getitem__(self, idx: int):
     return self.images[idx].view(1, 28, 28), self.labels[idx]
 
@@ -45,47 +46,44 @@ class VIBLeNet(nn.Module):
     )
 
     self.fc_mu = nn.Linear(hidden2, z_dim)
-    self.fc_logvar = nn.Linear(hidden2, z_dim)
+    self.fc_std = nn.Linear(hidden2, z_dim)
 
     self.decoder = nn.Linear(z_dim, output_shape)
 
-  def reparameterize(self, mu, logvar):
-    if mu.requires_grad:
-      std = torch.exp(0.5 * torch.clamp(logvar, -10, 10))
-      eps = torch.randn_like(std)
-      return mu + eps * std
-    else:
-      return mu
+  def encode(self, x):
+    x = self.encoder(x)
+    return self.fc_mu(x), F.softplus(self.fc_std(x)-5, beta=1)
+
+  def reparameterize(self, mu, std):
+    '''
+    mu: mean u
+    std: standard deviation sigma
+    '''
+    eps = torch.randn_like(std)
+    return mu + std*eps
 
   def forward(self, x):
     x_flat = x.view(x.size(0), -1)
-    h = self.encoder(x_flat)
-    mu = self.fc_mu(h)
-    logvar = self.fc_logvar(h)
-    z = self.reparameterize(mu, logvar)
-    logits = self.decoder(z)
-    return logits, mu, logvar
+    mu, std = self.encode(x_flat)
+    z = self.reparameterize(mu, std)
+    return self.decoder(z), mu, std
 
-def vib_loss(
-    logits: torch.Tensor,
-    y: torch.Tensor,
-    mu: torch.Tensor,
-    logvar: torch.Tensor,
-    beta: float=1e-3,
-) -> torch.Tensor:
+# kl-diverg?
+def loss_function(y_pred, y, mu, std, beta):
   '''
-  ce: lower bound on I(Z;Y) (prediction)
-  kl: upper bound on I(Z;X) (compression)
-  bigger beta = more compression
+  y_pred : [batch_size,10]
+  y : [batch_size,10]
+  mu : [batch_size,z_dim]
+  std: [batch_size,z_dim]
+
+  CE: lower bound on I(Z;Y) (prediction)
+  KL: upper bound on I(Z;X) (compression)
+  # beta bigger: more compression
   '''
-
-  ce = F.cross_entropy(logits, y, reduction='mean')
-
-  logvar = torch.clamp(logvar, min=-10, max=10)
-  kl_per_sample = 0.5 * torch.sum(torch.exp(logvar) + mu**2 - 1.0 - logvar, dim=1)
-  kl = kl_per_sample.mean()
-
-  return ce + beta * kl
+  # TODO: do std + 1e-8 to avoid nan
+  CE = F.cross_entropy(y_pred, y, reduction='sum')
+  KL = 0.5 * torch.sum(mu.pow(2) + std.pow(2) - 2*std.log() - 1)
+  return (beta*KL + CE) / y.size(0)
 
 def train_epoch(model, dataloader, optimizer, device, beta: float):
   model.train()
@@ -93,25 +91,26 @@ def train_epoch(model, dataloader, optimizer, device, beta: float):
   correct = 0
   total = 0
 
-  for x, y in (t := tqdm(dataloader, desc='training', leave=False)):
-    x, y = x.to(device), y.to(device)
+  for X, Y in (tq := tqdm(dataloader, desc='training', leave=False)):
+    X, Y = X.to(device), Y.to(device)
 
     optimizer.zero_grad()
 
-    logits, mu, logvar = model(x)
-    loss = vib_loss(logits, y, mu, logvar, beta)
+    log_probs, mu, std = model(X)
+    loss = loss_function(log_probs, Y, mu, std, beta)
     loss.backward()
     optimizer.step()
 
-    bs = x.size(0)
+    # accumulate (note multiply nll by batch size to match previous running_loss scheme)
+    bs = X.size(0)
     running_loss += loss.item() * bs
 
-    preds = logits.argmax(dim=1)
-    correct += (preds == y).sum().item()
+    _, preds = torch.max(log_probs, 1)
+    correct += (preds == Y).sum().item()
     total += bs
 
-    t.set_postfix({
-      'loss': f'{loss.item():.3f}',
+    tq.set_postfix({
+      'loss': f'{loss.item():.4f}',
       'acc': f'{100.0 * correct / total:.2f}'
     })
 
@@ -126,71 +125,78 @@ def evaluate(model, dataloader, device, beta: float):
   total = 0
 
   with torch.no_grad():
-    for x, y in dataloader:
-      x, y = x.to(device), y.to(device)
-      logits, mu, logvar = model(x)
-      loss = vib_loss(logits, y, mu, logvar, beta)
+    for images, labels in dataloader:
+      images, labels = images.to(device), labels.to(device)
+      log_probs, mu, std = model(images)
+      loss = loss_function(log_probs, labels, mu, std, beta)
 
-      bs = x.size(0)
+      bs = images.size(0)
       running_loss += loss.item() * bs
 
-      preds = logits.argmax(dim=1)
-      correct += (preds == y).sum().item()
+      _, preds = torch.max(log_probs, 1)
+      correct += (preds == labels).sum().item()
       total += bs
 
   avg_loss = running_loss / total
   accuracy = 100.0 * correct / total
   return avg_loss, accuracy
 
-z_dim = 16
-base_beta = 1e-4
-max_beta   = 2e-1
+def train_model(
+    model,
+    train_loader: DataLoader,
+    test_loader: DataLoader,
+    optimizer,
+    device,
+    epochs: int,
+    beta: float=1.0
+):
+  model.to(device)
+  for epoch in range(epochs):
+    train_loss, train_acc = train_epoch(model, train_loader, optimizer, device, beta=beta)
+    test_loss, test_acc = evaluate(model, test_loader, device, beta=beta)
+    print(f'''epoch [{epoch+1}/{epochs}] β({beta}) train loss: {train_loss:.3f} | train acc: {train_acc:.2f}%
+          \t    test loss: {test_loss:.3f} | test acc: {test_acc:.2f}%''')
 
-batch_size = 256
+#betas = [0.3, 0.2, 0.1, 0.05, 0.01, 0.005, 0.001, 0.0005, 0.0001]
+#betas = [0.05, 0.01, 0.005, 0.001, 0.0005, 0.0001, 0.00005, 0.00001, 0.000005, 0.000001]
+betas = [0.5, 0.4, 0.3, 0.2, 0.1, 0.05, 0.01, 0.005]
+z_dim = 30
+
 train_test_split = 0.8
+batch_size = 128
 learning_rate = 1e-3
-weight_decay=1e-5
-warmup_epochs = 18
-epochs = 60
-
-def curr_beta(epoch):
-  if epoch < warmup_epochs:
-    return base_beta + (max_beta - base_beta) * (epoch / warmup_epochs)
-  else: return max_beta
+epochs = 45
 
 if __name__ == '__main__':
   dataset = MnistCsvDataset('../data/mnist_data.csv')
   train_size = int(train_test_split * len(dataset))
   test_size = len(dataset) - train_size
   print(f'train_size: {train_size}, test_size: {test_size}')
+
   train_dataset, test_dataset = random_split(dataset, [train_size, test_size])
+
   train_loader = DataLoader(train_dataset, batch_size, shuffle=True)
   test_loader = DataLoader(test_dataset, batch_size, shuffle=True)
 
-  model = VIBLeNet(z_dim=z_dim).to(device)
-  optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
-  scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
+  loss_acc_list = []
+  for b in betas:
+    model = VIBLeNet(z_dim=z_dim)
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
-  test_stats = []
-  for epoch in range(epochs):
-    print(f'epoch {epoch}/{epochs}')
-    train_loss, train_acc = train_epoch(
-        model, train_loader, optimizer, device, curr_beta(epoch)
-    )
-    test_loss, test_acc = evaluate(
-        model, test_loader, device, curr_beta(epoch)
-    )
-    print(f'train loss: {train_loss:.4f} | train acc: {train_acc:.2f}%')
-    print(f'test  loss: {test_loss:.4f} | test  acc: {test_acc:.2f}%\n')
-    test_stats.append((epoch, curr_beta(epoch), test_loss, test_acc))
+    train_model(model, train_loader, test_loader, optimizer, device, epochs, beta=b)
+    avg_loss, avg_acc = evaluate(model, test_loader, device, b)
+    loss_acc_list.append((avg_loss, avg_acc))
+    torch.save(model.state_dict(), f'../weights/vib_lenet_300_100_mnist_{b}.pth')
 
-    scheduler.step()
+  with open('../weights/vib_lenet_300_100_mnist_beta_loss_acc_data.json', 'w') as json_file:
+    json.dump({'betas': betas, 'loss_acc_list': loss_acc_list}, json_file, indent=2)
 
-  torch.save(model.state_dict(), f'../weights/vib_lenet_300_100_mnist.pth')
-
-  for (epoch, beta, tloss, tacc) in test_stats:
-    print(f'epoch {epoch}: beta {beta:.3f}, loss {tloss:.3f}, acc {tacc:.3f}')
-
-  #avg_loss, acc = evaluate(model, test_loader, device, max_beta)
-  #fig, ax = plot_x_y(betas, acc_list, None, 'β', 'acc', 'accuracy', None, False, True)
-  #fig.savefig('../plots/vib_lenet_300_100_mnist_beta_vs_acc.png', dpi=300, bbox_inches='tight')
+  with open('../weights/vib_lenet_300_100_mnist_beta_loss_acc_params.json', 'w') as json_file:
+    json.dump({
+      'betas': betas,
+      'z_dim': z_dim,
+      'learning_rate': learning_rate,
+      'batch_size': batch_size,
+      'epochs': epochs,
+      'train_test_split': train_test_split,
+    }, json_file, indent=2)
