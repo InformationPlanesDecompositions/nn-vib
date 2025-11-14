@@ -29,3 +29,6 @@
 
 ### Data
 - https://github.com/zalandoresearch/fashion-mnist?tab=readme-ov-file
+
+### Reporting
+
