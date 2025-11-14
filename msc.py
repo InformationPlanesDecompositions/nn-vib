@@ -1,5 +1,6 @@
 from typing import List, Optional
 import matplotlib.pyplot as plt
+import torch
 
 def plot_x_y(
     xs: List,
@@ -37,3 +38,20 @@ def plot_x_y(
 
   ax.legend()
   return fig, ax
+
+def get_device():
+  device = ''
+  if torch.cuda.is_available(): device = 'cuda'
+  elif torch.mps.is_available(): device = 'mps'
+  else: device = 'cpu'
+  return torch.device(device)
+
+def load_weights(filepath, verbose=True):
+  weights = torch.load(filepath, map_location='cpu')
+  if verbose: print(f"loaded object type: {type(weights)}")
+  if isinstance(weights, dict):
+    if verbose: print("keys in the weights file:")
+    for key in weights.keys():
+      if verbose: print(f"- {key} with shape {weights[key].shape}")
+
+  return weights

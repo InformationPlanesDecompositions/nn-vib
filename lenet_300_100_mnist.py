@@ -1,30 +1,17 @@
 import torch
 import torch.nn.functional as F
 from torch import nn
-from torch.utils.data import Dataset, random_split, DataLoader
+from torch.utils.data import random_split, DataLoader
 import torch.nn.utils.prune as prune
 import numpy as np
 from tqdm import tqdm
 import copy
 import matplotlib.pyplot as plt
-
-from testing_utils import get_device
+from msc import get_device
 
 torch.manual_seed(42)
 device = get_device()
 print(f'using device: {device}')
-
-class MnistCsvDataset(Dataset):
-  def __init__(self, filepath: str):
-    data = np.loadtxt(filepath, delimiter=',', dtype=np.float32)
-    self.labels = torch.tensor(data[:, 0], dtype=torch.long)
-    self.images = torch.tensor(data[:, 1:], dtype=torch.float32)
-
-  def __len__(self):
-    return len(self.labels)
-
-  def __getitem__(self, idx: int):
-    return self.images[idx].view(1, 28, 28), self.labels[idx]
 
 class LeNet(nn.Module):
   def __init__(self, input_size: int=784, hidden1: int=300, hidden2: int=100, num_classes: int=10):

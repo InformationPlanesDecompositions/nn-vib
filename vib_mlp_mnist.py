@@ -2,7 +2,6 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 from torch.utils.data import random_split, DataLoader
-import numpy as np
 from tqdm import tqdm
 import json
 from data import MnistCsvDataset
