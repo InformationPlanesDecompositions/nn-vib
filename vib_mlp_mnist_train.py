@@ -144,14 +144,15 @@ def train_model(
     beta: float=1.0
 ):
   model.to(device)
-  test_losses = []
+  train_losses, test_losses = [], []
   for epoch in range(epochs):
     train_loss, train_acc = train_epoch(model, train_loader, optimizer, device, beta=beta)
     test_loss, test_acc = evaluate(model, test_loader, device, beta=beta)
     print(f'''epoch [{epoch+1}/{epochs}] β({beta}) train loss: {train_loss:.3f} | train acc: {train_acc:.2f}%
           \t    test loss: {test_loss:.3f} | test acc: {test_acc:.2f}%''')
+    train_losses.append(train_loss)
     test_losses.append(test_loss)
-  return test_losses
+  return train_losses, test_losses
 
 def main():
   parser = argparse.ArgumentParser(description='Training script with configurable hyperparameters.')
@@ -159,7 +160,7 @@ def main():
   parser.add_argument('--z_dim', type=int, default=30, help='Latent dimension size (default: 30)')
   parser.add_argument('--hidden1', type=int, default=300, help='Size of first hidden layer (default: 300)')
   parser.add_argument('--hidden2', type=int, default=100, help='Size of second hidden layer (default: 100)')
-  parser.add_argument('--epochs', type=int, default=500, help='Number of training epochs (default: 500)')
+  parser.add_argument('--epochs', type=int, default=200, help='Number of training epochs (default: 500)')
   parser.add_argument('--rnd_seed', type=bool, default=False, help='Random torch seed or default of 42')
   parser.add_argument('--learning_rate', type=float, default=1e-3, help='Learning rate (default: 1e-3)')
   parser.add_argument('--batch_size', type=int, default=64, help='Batch size (default: 64)')
@@ -203,7 +204,7 @@ def main():
   model = VIBNet(z_dim, 784, hidden1, hidden2, 10)
   optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
-  test_losses = train_model(model, train_loader, test_loader, optimizer, device, epochs, beta=beta)
+  train_losses, test_losses = train_model(model, train_loader, test_loader, optimizer, device, epochs, beta=beta)
   test_loss, test_acc = evaluate(model, test_loader, device, beta)
   print(f'test loss: {test_loss}, test acc: {test_acc}')
 
@@ -224,12 +225,13 @@ def main():
 
   epochs = len(test_losses)
   plt.figure(figsize=(10, 6))
-  plt.plot(range(1, epochs + 1), test_losses, marker='o', linewidth=2, markersize=6, color='#1f77b4')
-  plt.title(f'Test Loss over Epochs (β = {beta})', fontsize=16, fontweight='bold', pad=20)
+  plt.plot(range(1, epochs + 1), train_losses, marker='o', linewidth=2, markersize=6, color='#1f77b4', label='Training Loss')
+  plt.plot(range(1, epochs + 1), test_losses, marker='o', linewidth=2, markersize=6, color='#ff7f0e', label='Test Loss')
+  plt.title(f'(vib_mnist_{hidden1}_{hidden2}_{z_dim}_{beta}_{epochs}) Loss', fontsize=16, fontweight='bold', pad=20)
   plt.xlabel('Epoch', fontsize=14)
-  plt.ylabel('Test Loss', fontsize=14)
+  plt.ylabel('Loss', fontsize=14)
   plt.grid(True, alpha=0.3)
-
+  plt.legend(fontsize=12)
   plt.savefig(f'{save_dir}/vib_mnist_{hidden1}_{hidden2}_{z_dim}_{beta}_{epochs}_test_loss.png', dpi=300, bbox_inches='tight')
 
 if __name__ == '__main__':
