@@ -4,7 +4,6 @@ from torch import nn
 from torch.utils.data import Dataset, random_split, DataLoader
 import numpy as np
 from tqdm import tqdm
-import matplotlib.pyplot as plt
 import json
 from testing_utils import get_device
 
@@ -168,7 +167,7 @@ learning_rate = 1e-3
 epochs = 45
 
 if __name__ == '__main__':
-  dataset = MnistCsvDataset('../data/mnist_data.csv')
+  dataset = MnistCsvDataset('data/mnist_data.csv')
   train_size = int(train_test_split * len(dataset))
   test_size = len(dataset) - train_size
   print(f'train_size: {train_size}, test_size: {test_size}')
@@ -186,12 +185,12 @@ if __name__ == '__main__':
     train_model(model, train_loader, test_loader, optimizer, device, epochs, beta=b)
     avg_loss, avg_acc = evaluate(model, test_loader, device, b)
     loss_acc_list.append((avg_loss, avg_acc))
-    torch.save(model.state_dict(), f'../weights/vib_lenet_300_100_mnist_{b}.pth')
+    torch.save(model.state_dict(), f'weights/vib_lenet_300_100_mnist_{b}.pth')
 
-  with open('../weights/vib_lenet_300_100_mnist_beta_loss_acc_data.json', 'w') as json_file:
+  with open('weights/vib_lenet_300_100_mnist_beta_loss_acc_data.json', 'w') as json_file:
     json.dump({'betas': betas, 'loss_acc_list': loss_acc_list}, json_file, indent=2)
 
-  with open('../weights/vib_lenet_300_100_mnist_beta_loss_acc_params.json', 'w') as json_file:
+  with open('weights/vib_lenet_300_100_mnist_beta_loss_acc_params.json', 'w') as json_file:
     json.dump({
       'betas': betas,
       'z_dim': z_dim,
