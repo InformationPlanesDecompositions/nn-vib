@@ -1,5 +1,4 @@
-## Neural Network Information Research
-- https://github.com/zalandoresearch/fashion-mnist?tab=readme-ov-file
+## Neural Network Information Bottleneck Research
 
 ### Papers (comments means read)
 - [Deep Learning and the Information Bottleneck Principle](https://arxiv.org/pdf/1503.02406)
@@ -9,6 +8,7 @@
     two random variables is very difficult/expensive
 
 - [Deep Variational Information Bottleneck](https://arxiv.org/pdf/1612.00410v7)
+  - ce and beta * kl
 
 - [Compressing Neural Networks using the Variational Information Bottleneck](https://arxiv.org/pdf/1802.10399)
   - Sota method basically because they compared to all other current methods and basically beat
@@ -26,8 +26,11 @@
 ### Questions
 - How can one measure generalization of a neural network and optimize on it? (implement as a cost function?)
   - Most likely just compression
-- How can one measure the agency of a neural network alone?
-- A way to measure how well the models size fits to the problem? In a way so that you could bring the model
-  down to a smallest possible size that fits more perfectly to the problem.
 - Is the pruneability a good measure for over-parameterization of a neural network?
-  - yes
+  - Yes.
+- What happens if I let it train to try and reach some sort of "grokking" with an ib layer?
+- How do the weights change even if you just keep training for a while? (could test this by
+  simply training on 200+ epoch)
+
+### Data
+- https://github.com/zalandoresearch/fashion-mnist?tab=readme-ov-file
