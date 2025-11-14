@@ -136,7 +136,6 @@ def train_model(
     train_loader: DataLoader,
     test_loader: DataLoader,
     optimizer,
-    scheduler,
     device,
     epochs: int,
     beta: float=1.0
@@ -149,7 +148,6 @@ def train_model(
     print(f'''epoch [{epoch+1}/{epochs}] β({beta}) train loss: {train_loss:.3f} | train acc: {train_acc:.2f}%
           \t    test loss: {test_loss:.3f} | test acc: {test_acc:.2f}%''')
     test_losses.append(test_loss)
-    scheduler.step()
   return test_losses
 
 def print_layer_boxplot_stats(
@@ -209,18 +207,13 @@ def print_layer_boxplot_stats(
     else:
         print('No weights found in any of the specified layers.')
 
-
-# === Example Usage ===
-# layer_names = ['encoder.0', 'encoder.2', 'fc_mu', 'fc_std']
-# print_layer_boxplot_stats(model, layer_names)
-
-beta = 0.3
+beta = 0.35
 z_dim = 30
 hidden1 = 300
 hidden2 = 100
 train_test_split = 0.8
-batch_size = 128
-learning_rate = 1e-2
+batch_size = 64
+learning_rate = 1e-3
 epochs = 500
 
 if __name__ == '__main__':
@@ -234,9 +227,8 @@ if __name__ == '__main__':
 
   model = VIBLeNet(hidden1=hidden1, hidden2=hidden2, z_dim=z_dim)
   optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-  scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=int(epochs/5), gamma=0.3)
 
-  test_losses = train_model(model, train_loader, test_loader, optimizer, scheduler, device, epochs, beta=beta)
+  test_losses = train_model(model, train_loader, test_loader, optimizer, device, epochs, beta=beta)
   test_loss, test_acc = evaluate(model, test_loader, device, beta)
   torch.save(model.state_dict(), f'weights/vib_mnist_{hidden1}_{hidden2}_mnist_{beta}_{epochs}.pth')
 
