@@ -16,8 +16,8 @@ class VIBLeNet(nn.Module):
       self,
       z_dim: int,
       input_shape: int=784,
-      hidden1: int=300,
-      hidden2: int=100,
+      hidden1: int=1024,
+      hidden2: int=1024,
       output_shape: int=10
   ):
     super().__init__()
@@ -143,15 +143,14 @@ def train_model(
     print(f'''epoch [{epoch+1}/{epochs}] β({beta}) train loss: {train_loss:.3f} | train acc: {train_acc:.2f}%
           \t    test loss: {test_loss:.3f} | test acc: {test_acc:.2f}%''')
 
-#betas = [0.3, 0.2, 0.1, 0.05, 0.01, 0.005, 0.001, 0.0005, 0.0001]
-#betas = [0.05, 0.01, 0.005, 0.001, 0.0005, 0.0001, 0.00005, 0.00001, 0.000005, 0.000001]
 betas = [0.5, 0.4, 0.3, 0.2, 0.1, 0.05, 0.01, 0.005]
-z_dim = 30
+z_dim = 256
 
 train_test_split = 0.8
 batch_size = 128
 learning_rate = 1e-3
 epochs = 45
+hidden = 1024
 
 if __name__ == '__main__':
   dataset = MnistCsvDataset('data/mnist_data.csv')
@@ -166,20 +165,18 @@ if __name__ == '__main__':
 
   loss_acc_list = []
   for b in betas:
-    model = VIBLeNet(z_dim=z_dim)
+    model = VIBLeNet(hidden1=hidden, hidden2=hidden, z_dim=z_dim)
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
     train_model(model, train_loader, test_loader, optimizer, device, epochs, beta=b)
     avg_loss, avg_acc = evaluate(model, test_loader, device, b)
     loss_acc_list.append((avg_loss, avg_acc))
-    torch.save(model.state_dict(), f'weights/vib_lenet_300_100_mnist_{b}.pth')
 
-  with open('weights/vib_lenet_300_100_mnist_beta_loss_acc_data.json', 'w') as json_file:
-    json.dump({'betas': betas, 'loss_acc_list': loss_acc_list}, json_file, indent=2)
-
-  with open('weights/vib_lenet_300_100_mnist_beta_loss_acc_params.json', 'w') as json_file:
+  with open('weights/vib_mlp_mnist_stats.json', 'w') as json_file:
     json.dump({
       'betas': betas,
+      'loss_acc_list': loss_acc_list,
+      'hidden_dim': hidden,
       'z_dim': z_dim,
       'learning_rate': learning_rate,
       'batch_size': batch_size,
