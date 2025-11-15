@@ -3,6 +3,7 @@
 import json
 import os
 import argparse
+from typing import Tuple, List
 import torch
 import torch.nn.functional as F
 from torch import nn
@@ -36,49 +37,56 @@ class VIBNet(nn.Module):
   ):
     super().__init__()
 
-    self.input_shape = input_shape
-    self.output_shape = output_shape
-
     self.fc1 = nn.Linear(input_shape, hidden1)
     self.fc2 = nn.Linear(hidden1, hidden2)
+
     self.fc_mu = nn.Linear(hidden2, z_dim)
-    self.fc_logvar = nn.Linear(hidden2, z_dim)
+    self.fc_sigma = nn.Linear(hidden2, z_dim)
 
     self.fc_decode = nn.Linear(z_dim, output_shape)
 
-  def encode(self, x):
+  def encode(self, x: torch.Tensor):
     h = F.relu(self.fc1(x))
     h = F.relu(self.fc2(h))
     mu = self.fc_mu(h)
-    logvar = self.fc_logvar(h)
-    logvar = torch.clamp(logvar, min=-5, max=5)
-    return mu, logvar
+    sigma = self.fc_sigma(h)
+    return mu, sigma
 
-  def reparameterize(self, mu, logvar):
-    if self.training:
-      std = torch.exp(0.5 * logvar) # std = sqrt(var)
-      eps = torch.randn_like(std)
-      return mu + eps * std
-    return mu # deterministic at inference
+  def reparameterize(self, mu: torch.Tensor, sigma: torch.Tensor):
+    eps = torch.randn_like(sigma)
+    return mu + sigma*eps
 
-  def forward(self, x):
+  def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     x_flat = x.view(x.size(0), -1)
-    mu, logvar = self.encode(x_flat)
-    z = self.reparameterize(mu, logvar)
+    mu, sigma = self.encode(x_flat)
+    z = self.reparameterize(mu, sigma)
     logits = self.fc_decode(z)
-    return logits, mu, logvar
+    return logits, mu, sigma
 
-def vib_loss(logits, y, mu, logvar, beta):
+def vib_loss(
+    logits: torch.Tensor,
+    y: torch.Tensor,
+    mu: torch.Tensor,
+    sigma: torch.Tensor,
+    beta: float
+) -> torch.Tensor:
   '''
   ce: lower bound on I(Z;Y) (prediction)
   kl: upper bound on I(Z;X) (compression)
-  # beta bigger: more compression
+  # (beta bigger = more compression)
   '''
-  ce_loss = F.cross_entropy(logits, y, reduction='mean') # or reduct 'sum'
-  kl = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp(), dim=1).mean()
-  return ce_loss + beta * kl
+  sigma.clamp(min=1e-8)
+  ce_loss = F.cross_entropy(logits, y)
+  kl = 0.5*torch.sum(mu.pow(2) + sigma.pow(2) - torch.log(sigma.pow(2)) - 1, dim=1).mean()
+  return ce_loss + beta*kl
 
-def train_epoch(model, dataloader, optimizer, device, beta: float):
+def train_epoch(
+    model: nn.Module,
+    dataloader: DataLoader,
+    optimizer: torch.optim.Optimizer,
+    device: torch.device,
+    beta: float
+) -> Tuple[float, float]:
   model.train()
   running_loss = 0.0
   correct = 0
@@ -89,8 +97,8 @@ def train_epoch(model, dataloader, optimizer, device, beta: float):
 
     optimizer.zero_grad()
 
-    logits, mu, logvar = model(X)
-    loss = vib_loss(logits, Y, mu, logvar, beta)
+    logits, mu, sigma = model(X)
+    loss = vib_loss(logits, Y, mu, sigma, beta)
     loss.backward()
     optimizer.step()
 
@@ -111,7 +119,12 @@ def train_epoch(model, dataloader, optimizer, device, beta: float):
   accuracy = 100.0 * correct / total
   return avg_loss, accuracy
 
-def evaluate(model, dataloader, device, beta: float):
+def evaluate(
+    model: nn.Module,
+    dataloader: DataLoader,
+    device: torch.device,
+    beta: float
+) -> Tuple[float, float]:
   model.eval()
   running_loss = 0.0
   correct = 0
@@ -120,8 +133,8 @@ def evaluate(model, dataloader, device, beta: float):
   with torch.no_grad():
     for images, labels in dataloader:
       images, labels = images.to(device), labels.to(device)
-      logits, mu, logvar = model(images)
-      loss = vib_loss(logits, labels, mu, logvar, beta)
+      logits, mu, sigma = model(images)
+      loss = vib_loss(logits, labels, mu, sigma, beta)
 
       bs = images.size(0)
       running_loss += loss.item() * bs
@@ -135,14 +148,14 @@ def evaluate(model, dataloader, device, beta: float):
   return avg_loss, accuracy
 
 def train_model(
-    model,
+    model: nn.Module,
     train_loader: DataLoader,
     test_loader: DataLoader,
-    optimizer,
-    device,
+    optimizer: torch.optim.Optimizer,
+    device: torch.device,
     epochs: int,
-    beta: float=1.0
-):
+    beta: float,
+) -> Tuple[List[float], List[float]]:
   model.to(device)
   train_losses, test_losses = [], []
   for epoch in range(epochs):
@@ -154,13 +167,13 @@ def train_model(
     test_losses.append(test_loss)
   return train_losses, test_losses
 
-def main():
+def main() -> None:
   parser = argparse.ArgumentParser(description='Training script with configurable hyperparameters.')
   parser.add_argument('--beta', type=float, required=True, help='Beta coefficient')
   parser.add_argument('--z_dim', type=int, default=30, help='Latent dimension size (default: 30)')
   parser.add_argument('--hidden1', type=int, default=300, help='Size of first hidden layer (default: 300)')
   parser.add_argument('--hidden2', type=int, default=100, help='Size of second hidden layer (default: 100)')
-  parser.add_argument('--epochs', type=int, default=200, help='Number of training epochs (default: 500)')
+  parser.add_argument('--epochs', type=int, default=10, help='Number of training epochs (default: 500)')
   parser.add_argument('--rnd_seed', type=bool, default=False, help='Random torch seed or default of 42')
   parser.add_argument('--learning_rate', type=float, default=1e-4, help='Learning rate (default: 1e-3)')
   parser.add_argument('--batch_size', type=int, default=64, help='Batch size (default: 64)')
