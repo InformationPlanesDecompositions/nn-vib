@@ -49,7 +49,7 @@ class VIBNet(nn.Module):
     h = F.relu(self.fc1(x))
     h = F.relu(self.fc2(h))
     mu = self.fc_mu(h)
-    sigma = self.fc_sigma(h)
+    sigma = F.softplus(self.fc_sigma(h)) + 1e-8 #sigma = self.fc_sigma(h)
     return mu, sigma
 
   def reparameterize(self, mu: torch.Tensor, sigma: torch.Tensor):
@@ -75,7 +75,6 @@ def vib_loss(
   kl: upper bound on I(Z;X) (compression)
   # (beta bigger = more compression)
   '''
-  sigma.clamp(min=1e-8)
   ce_loss = F.cross_entropy(logits, y)
   kl = 0.5*torch.sum(mu.pow(2) + sigma.pow(2) - torch.log(sigma.pow(2)) - 1, dim=1).mean()
   return ce_loss + beta*kl
@@ -190,7 +189,7 @@ def main() -> None:
   batch_size = args.batch_size
   device = get_device()
 
-  save_dir = f'save_stats_weights/vib_mnist_{hidden1}_{hidden2}_{z_dim}_{beta}_{epochs}'
+  save_dir = f'save_stats_weights/vib_mnist_{hidden1}_{hidden2}_{z_dim}_{beta}'
   os.makedirs(save_dir, exist_ok=True)
 
   print(
@@ -221,9 +220,9 @@ def main() -> None:
   test_loss, test_acc = evaluate(model, test_loader, device, beta)
   print(f'test loss: {test_loss}, test acc: {test_acc}')
 
-  torch.save(model.state_dict(), f'{save_dir}/vib_mnist_{hidden1}_{hidden2}_{z_dim}_{beta}_{epochs}.pth')
+  torch.save(model.state_dict(), f'{save_dir}/vib_mnist_{hidden1}_{hidden2}_{z_dim}_{beta}.pth')
 
-  with open(f'{save_dir}/vib_mnist_{hidden1}_{hidden2}_{z_dim}_{beta}_{epochs}_stats.json', 'w') as json_file:
+  with open(f'{save_dir}/vib_mnist_{hidden1}_{hidden2}_{z_dim}_{beta}_stats.json', 'w') as json_file:
     json.dump({
       'beta': beta,
       'test_losses': test_losses,
@@ -240,12 +239,12 @@ def main() -> None:
   plt.figure(figsize=(10, 6))
   plt.plot(range(1, epochs + 1), train_losses, marker='o', linewidth=2, markersize=6, color='#1f77b4', label='Training Loss')
   plt.plot(range(1, epochs + 1), test_losses, marker='o', linewidth=2, markersize=6, color='#ff7f0e', label='Test Loss')
-  plt.title(f'(vib_mnist_{hidden1}_{hidden2}_{z_dim}_{beta}_{epochs}) Loss', fontsize=16, fontweight='bold', pad=20)
+  plt.title(f'(vib_mnist_{hidden1}_{hidden2}_{z_dim}_{beta}) Loss', fontsize=16, fontweight='bold', pad=20)
   plt.xlabel('Epoch', fontsize=14)
   plt.ylabel('Loss', fontsize=14)
   plt.grid(True, alpha=0.3)
   plt.legend(fontsize=12)
-  plt.savefig(f'{save_dir}/vib_mnist_{hidden1}_{hidden2}_{z_dim}_{beta}_{epochs}_test_loss.png', dpi=300, bbox_inches='tight')
+  plt.savefig(f'{save_dir}/vib_mnist_{hidden1}_{hidden2}_{z_dim}_{beta}_test_loss.png', dpi=300, bbox_inches='tight')
 
 if __name__ == '__main__':
   main()
