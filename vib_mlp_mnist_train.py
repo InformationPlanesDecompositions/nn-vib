@@ -187,10 +187,10 @@ def main() -> None:
   parser.add_argument('--z_dim', type=int, default=30, help='Latent dimension size (default: 30)')
   parser.add_argument('--hidden1', type=int, default=300, help='Size of first hidden layer (default: 300)')
   parser.add_argument('--hidden2', type=int, default=100, help='Size of second hidden layer (default: 100)')
-  parser.add_argument('--epochs', type=int, default=10, help='Number of training epochs (default: 500)')
+  parser.add_argument('--epochs', type=int, default=200, help='Number of training epochs (default: 500)')
   parser.add_argument('--rnd_seed', type=bool, default=False, help='Random torch seed or default of 42')
   parser.add_argument('--learning_rate', type=float, default=1e-4, help='Learning rate (default: 1e-3)')
-  parser.add_argument('--batch_size', type=int, default=64, help='Batch size (default: 64)')
+  parser.add_argument('--batch_size', type=int, default=100, help='Batch size (default: 64)')
   args = parser.parse_args()
 
   if not args.rnd_seed: torch.manual_seed(42)
@@ -200,8 +200,8 @@ def main() -> None:
   hidden1 = args.hidden1
   hidden2 = args.hidden2
   learning_rate = args.learning_rate # 1e-4 in deep vib paper
-  epochs = args.epochs
-  batch_size = args.batch_size
+  batch_size = args.batch_size # 100 in deep vib paper
+  epochs = args.epochs # 200 in deep vib paper
   device = get_device()
 
   save_dir = f'save_stats_weights/vib_mnist_{hidden1}_{hidden2}_{z_dim}_{beta}'
