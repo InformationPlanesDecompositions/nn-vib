@@ -91,7 +91,7 @@ def evaluate(model, dataloader, criterion, device):
   accuracy = 100.0 * correct / total
   return avg_loss, accuracy
 
-def train_model(model, train_loader, test_loader: DataLoader, criterion, optimizer, device, epochs):
+def train_model(model, train_loader, test_loader: DataLoader, criterion, optimizer, scheduler, device, epochs):
   model.to(device)
 
   for epoch in range(epochs):
@@ -99,6 +99,8 @@ def train_model(model, train_loader, test_loader: DataLoader, criterion, optimiz
 
     train_loss, train_acc = train_epoch(model, train_loader, criterion, optimizer, device)
     test_loss, test_acc = evaluate(model, test_loader, criterion, device)
+
+    scheduler.step()
 
     print(f'train loss: {train_loss:.4f} | train acc: {train_acc:.2f}%')
     print(f'test  loss: {test_loss:.4f} | test  acc: {test_acc:.2f}%\n')
@@ -111,15 +113,16 @@ if __name__ == '__main__':
 
   train_dataset, test_dataset = random_split(dataset, [train_size, test_size])
 
-  train_loader = DataLoader(train_dataset, batch_size=128, shuffle=True)
-  test_loader = DataLoader(test_dataset, batch_size=128, shuffle=True)
+  train_loader = DataLoader(train_dataset, batch_size=100, shuffle=True)
+  test_loader = DataLoader(test_dataset, batch_size=100, shuffle=True)
 
   model = LeNet()
-  epochs = 50
-  learning_rate = 1e-3
+  epochs = 200
+  learning_rate = 1e-4
   criterion = nn.NLLLoss()
-  optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+  optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, betas=(0.5, 0.999))
+  scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda epoch: 0.97** (epoch // 2))
 
-  train_model(model, train_loader, test_loader, criterion, optimizer, device, epochs)
+  train_model(model, train_loader, test_loader, criterion, optimizer, scheduler, device, epochs)
 
-  torch.save(model.state_dict(), 'save_stats_weights/lenet_300_100_mnist/lenet_300_100_mnist.pth')
+  torch.save(model.state_dict(), 'save_stats_weights/vib_mnist_300_100_default_novib/vib_mnist_300_100_default_novib.pth')

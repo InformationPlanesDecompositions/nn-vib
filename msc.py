@@ -48,10 +48,10 @@ def get_device():
 
 def load_weights(filepath, verbose=True):
   weights = torch.load(filepath, map_location='cpu')
-  if verbose: print(f"loaded object type: {type(weights)}")
+  if verbose: print(f'loaded object type: {type(weights)}')
   if isinstance(weights, dict):
-    if verbose: print("keys in the weights file:")
+    if verbose: print('keys in the weights file:')
     for key in weights.keys():
-      if verbose: print(f"- {key} with shape {weights[key].shape}")
+      if verbose: print(f'- {key} with shape {weights[key].shape}')
 
   return weights
