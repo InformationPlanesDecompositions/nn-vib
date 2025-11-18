@@ -3,7 +3,7 @@
 import json
 import os
 import argparse
-from typing import Tuple, List
+from typing import Tuple, List, Optional
 import torch
 import torch.nn.functional as F
 from torch import nn
@@ -41,20 +41,25 @@ class VIBNet(nn.Module):
     self.fc2 = nn.Linear(hidden1, hidden2)
 
     self.fc_mu = nn.Linear(hidden2, z_dim)
-    self.fc_sigma = nn.Linear(hidden2, z_dim)
+    self.fc_logvar = nn.Linear(hidden2, z_dim)
 
     self.fc_decode = nn.Linear(z_dim, output_shape)
 
   def encode(self, x: torch.Tensor):
     h = F.relu(self.fc1(x))
     h = F.relu(self.fc2(h))
+
     mu = self.fc_mu(h)
-    sigma = F.softplus(self.fc_sigma(h)) + 1e-8 #sigma = self.fc_sigma(h)
+    logvar = self.fc_logvar(h)
+
+    # deep vib eq. 19
+    sigma = F.softmax(logvar - 5.0, dim=1)
+
     return mu, sigma
 
-  def reparameterize(self, mu: torch.Tensor, sigma: torch.Tensor):
-    eps = torch.randn_like(sigma)
-    return mu + sigma*eps
+  def reparameterize(self, mu: torch.Tensor, std: torch.Tensor):
+    eps = torch.randn_like(std)
+    return mu + eps * std
 
   def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     x_flat = x.view(x.size(0), -1)
@@ -76,13 +81,18 @@ def vib_loss(
   # (beta bigger = more compression)
   '''
   ce_loss = F.cross_entropy(logits, y)
-  kl = 0.5*torch.sum(mu.pow(2) + sigma.pow(2) - torch.log(sigma.pow(2)) - 1, dim=1).mean()
-  return ce_loss + beta*kl
+
+  kl = -0.5*torch.sum(1 + 2*torch.log(sigma) - mu.pow(2) - sigma.pow(2), dim=1)
+  kl_avg = torch.mean(kl)
+
+  total_loss = ce_loss + beta*kl_avg
+
+  return total_loss
 
 def train_epoch(
     model: nn.Module,
     dataloader: DataLoader,
-    optimizer: torch.optim.Optimizer,
+    optimizer: optim.Optimizer,
     device: torch.device,
     beta: float
 ) -> Tuple[float, float]:
@@ -150,7 +160,8 @@ def train_model(
     model: nn.Module,
     train_loader: DataLoader,
     test_loader: DataLoader,
-    optimizer: torch.optim.Optimizer,
+    optimizer: optim.Optimizer,
+    scheduler: Optional[optim.lr_scheduler.LRScheduler],
     device: torch.device,
     epochs: int,
     beta: float,
@@ -160,10 +171,14 @@ def train_model(
   for epoch in range(epochs):
     train_loss, train_acc = train_epoch(model, train_loader, optimizer, device, beta=beta)
     test_loss, test_acc = evaluate(model, test_loader, device, beta=beta)
+
+    if scheduler: scheduler.step()
+
     print(f'''epoch [{epoch+1}/{epochs}] β({beta}) train loss: {train_loss:.3f} | train acc: {train_acc:.2f}%
           \t    test loss: {test_loss:.3f} | test acc: {test_acc:.2f}%''')
     train_losses.append(train_loss)
     test_losses.append(test_loss)
+
   return train_losses, test_losses
 
 def main() -> None:
@@ -184,7 +199,7 @@ def main() -> None:
   z_dim = args.z_dim
   hidden1 = args.hidden1
   hidden2 = args.hidden2
-  learning_rate = args.learning_rate
+  learning_rate = args.learning_rate # 1e-4 in deep vib paper
   epochs = args.epochs
   batch_size = args.batch_size
   device = get_device()
@@ -214,9 +229,20 @@ def main() -> None:
   test_loader = DataLoader(test_dataset, batch_size, shuffle=True)
 
   model = VIBNet(z_dim, 784, hidden1, hidden2, 10)
-  optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+  optimizer = optim.Adam(model.parameters(), lr=learning_rate, betas=(0.5, 0.999))
+  scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda epoch: 0.97** (epoch // 2))
 
-  train_losses, test_losses = train_model(model, train_loader, test_loader, optimizer, device, epochs, beta=beta)
+  train_losses, test_losses = train_model(
+      model,
+      train_loader,
+      test_loader,
+      optimizer,
+      scheduler,
+      device,
+      epochs,
+      beta=beta
+  )
+
   test_loss, test_acc = evaluate(model, test_loader, device, beta)
   print(f'test loss: {test_loss}, test acc: {test_acc}')
 
