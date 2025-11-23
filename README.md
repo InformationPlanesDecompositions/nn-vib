@@ -30,4 +30,8 @@
 ### Data
 - https://github.com/zalandoresearch/fashion-mnist?tab=readme-ov-file
 
-### Reporting
+### Todo
+- [ ] Train at more beta in the lower range
+- [ ] Train at higher beta just to see (play with learning rates and epochs)
+- [ ] Look at actual I(Z;X) and I(Z;Y)
+- [ ] Log scales on box plots?

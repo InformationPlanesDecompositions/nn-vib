@@ -193,7 +193,10 @@ def main() -> None:
   parser.add_argument('--batch_size', type=int, default=100, help='Batch size (default: 64)')
   args = parser.parse_args()
 
-  if not args.rnd_seed: torch.manual_seed(42)
+  if not args.rnd_seed:
+    torch.manual_seed(42)
+    if torch.cuda.is_available():
+      torch.cuda.manual_seed(42)
 
   beta = args.beta
   z_dim = args.z_dim
