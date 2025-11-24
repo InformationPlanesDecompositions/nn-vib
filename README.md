@@ -32,6 +32,5 @@
 - [ ] Train at higher beta just to see (play with learning rates and epochs)
 - [ ] Look at actual I(Z;X) and I(Z;Y)
 - [ ] Log scales on box plots?
-- [ ] Try different pruning methods for the non ib layers
-  - The idea being that dimensions with near zero mutual information to T can be pruned
-  - Maybe measure mutual information for each dimension and inspect prunability based on that?
+- [X] Try with the bottleneck at the beginning of the network
+  - PUT THE IB (300 -> IB -> 100 -> 10) (ib dim of 75)

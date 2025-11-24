@@ -38,16 +38,15 @@ class VIBNet(nn.Module):
     super().__init__()
 
     self.fc1 = nn.Linear(input_shape, hidden1)
-    self.fc2 = nn.Linear(hidden1, hidden2)
 
-    self.fc_mu = nn.Linear(hidden2, z_dim)
-    self.fc_logvar = nn.Linear(hidden2, z_dim)
+    self.fc_mu = nn.Linear(hidden1, z_dim)
+    self.fc_logvar = nn.Linear(hidden1, z_dim)
 
-    self.fc_decode = nn.Linear(z_dim, output_shape)
+    self.fc2 = nn.Linear(z_dim, hidden2)
+    self.fc_decode = nn.Linear(hidden2, output_shape)
 
   def encode(self, x: torch.Tensor):
     h = F.relu(self.fc1(x))
-    h = F.relu(self.fc2(h))
 
     mu = self.fc_mu(h)
     logvar = self.fc_logvar(h)
@@ -61,11 +60,16 @@ class VIBNet(nn.Module):
     eps = torch.randn_like(std)
     return mu + eps * std
 
+  def decode(self, x: torch.Tensor):
+    h = F.relu(self.fc2(x))
+    logits = self.fc_decode(h)
+    return logits
+
   def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     x_flat = x.view(x.size(0), -1)
     mu, sigma = self.encode(x_flat)
     z = self.reparameterize(mu, sigma)
-    logits = self.fc_decode(z)
+    logits = self.decode(z)
     return logits, mu, sigma
 
 def vib_loss(
@@ -82,11 +86,12 @@ def vib_loss(
   '''
   ce_loss = F.cross_entropy(logits, y)
 
-  kl = -0.5*torch.sum(1 + 2*torch.log(sigma) - mu.pow(2) - sigma.pow(2), dim=1)
-  kl_avg = torch.mean(kl)
+  sigma = torch.clamp(sigma, 1e-10)
+  kl = -0.5*torch.sum(1 + 2*torch.log(sigma) - mu.pow(2) - sigma.pow(2), dim=1).mean()
 
-  total_loss = ce_loss + beta*kl_avg
+  total_loss = ce_loss + beta*kl
 
+  # TODO: return ce_loss and kl as well and analyze
   return total_loss
 
 def train_epoch(
@@ -184,13 +189,13 @@ def train_model(
 def main() -> None:
   parser = argparse.ArgumentParser(description='Training script with configurable hyperparameters.')
   parser.add_argument('--beta', type=float, required=True, help='Beta coefficient')
-  parser.add_argument('--z_dim', type=int, default=30, help='Latent dimension size (default: 30)')
-  parser.add_argument('--hidden1', type=int, default=300, help='Size of first hidden layer (default: 300)')
-  parser.add_argument('--hidden2', type=int, default=100, help='Size of second hidden layer (default: 100)')
-  parser.add_argument('--epochs', type=int, default=200, help='Number of training epochs (default: 500)')
+  parser.add_argument('--z_dim', type=int, default=75, help='Latent dimension size')
+  parser.add_argument('--hidden1', type=int, default=300, help='Size of first hidden layer')
+  parser.add_argument('--hidden2', type=int, default=100, help='Size of second hidden layer')
+  parser.add_argument('--epochs', type=int, default=200, help='Number of training epochs')
   parser.add_argument('--rnd_seed', type=bool, default=False, help='Random torch seed or default of 42')
-  parser.add_argument('--learning_rate', type=float, default=1e-4, help='Learning rate (default: 1e-3)')
-  parser.add_argument('--batch_size', type=int, default=100, help='Batch size (default: 64)')
+  parser.add_argument('--learning_rate', type=float, default=1e-4, help='Learning rate')
+  parser.add_argument('--batch_size', type=int, default=64, help='Batch size')
   args = parser.parse_args()
 
   if not args.rnd_seed:
