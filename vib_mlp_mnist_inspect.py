@@ -158,4 +158,6 @@ plt.grid(True, which="both", ls="-", alpha=0.2) # 'both' grids for log scale
 
 plt.tight_layout()
 plt.savefig(f'plots/vib_mnist_{h1}_{h2}_{z_dim}_beta_weight_hist.png', dpi=300, bbox_inches='tight')
-plt.show()
+plt.show(block=False)
+
+input('...')

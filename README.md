@@ -27,11 +27,11 @@
 - How do the weights change even if you just keep training for a while? (could test this by
   simply training on 200+ epoch)
 
-### Data
-- https://github.com/zalandoresearch/fashion-mnist?tab=readme-ov-file
-
 ### Todo
 - [ ] Train at more beta in the lower range
 - [ ] Train at higher beta just to see (play with learning rates and epochs)
 - [ ] Look at actual I(Z;X) and I(Z;Y)
 - [ ] Log scales on box plots?
+- [ ] Try different pruning methods for the non ib layers
+  - The idea being that dimensions with near zero mutual information to T can be pruned
+  - Maybe measure mutual information for each dimension and inspect prunability based on that?
