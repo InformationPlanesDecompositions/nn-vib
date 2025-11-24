@@ -33,4 +33,4 @@
 - [ ] Look at actual I(Z;X) and I(Z;Y)
 - [ ] Log scales on box plots?
 - [X] Try with the bottleneck at the beginning of the network
-  - PUT THE IB (300 -> IB -> 100 -> 10) (ib dim of 75)
+  - Put the ib (300 -> IB -> 100 -> 10) (ib dim of 75)
