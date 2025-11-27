@@ -15,270 +15,271 @@ from tqdm import tqdm
 from msc import get_device
 
 class MnistCsvDataset(Dataset):
-  def __init__(self, filepath: str):
-    data = np.loadtxt(filepath, delimiter=',', dtype=np.float32)
-    self.labels = torch.tensor(data[:, 0], dtype=torch.long)
-    self.images = torch.tensor(data[:, 1:], dtype=torch.float32)
+    def __init__(self, filepath: str):
+        data = np.loadtxt(filepath, delimiter=',', dtype=np.float32)
+        self.labels = torch.tensor(data[:, 0], dtype=torch.long)
+        self.images = torch.tensor(data[:, 1:], dtype=torch.float32)
 
-  def __len__(self):
-    return len(self.labels)
+    def __len__(self):
+        return len(self.labels)
 
-  def __getitem__(self, idx: int):
-    return self.images[idx].view(1, 28, 28), self.labels[idx]
+    def __getitem__(self, idx: int):
+        return self.images[idx].view(1, 28, 28), self.labels[idx]
 
 class VIBNet(nn.Module):
-  def __init__(
-      self,
-      z_dim: int,
-      input_shape: int,
-      hidden1: int,
-      hidden2: int,
-      output_shape: int,
-  ):
-    super().__init__()
+    def __init__(
+            self,
+            z_dim: int,
+            input_shape: int,
+            hidden1: int,
+            hidden2: int,
+            output_shape: int,
+    ):
+        super().__init__()
 
-    self.fc1 = nn.Linear(input_shape, hidden1)
+        self.fc1 = nn.Linear(input_shape, hidden1)
 
-    self.fc_mu = nn.Linear(hidden1, z_dim)
-    self.fc_logvar = nn.Linear(hidden1, z_dim)
+        self.fc_mu = nn.Linear(hidden1, z_dim)
+        self.fc_logvar = nn.Linear(hidden1, z_dim)
 
-    self.fc2 = nn.Linear(z_dim, hidden2)
-    self.fc_decode = nn.Linear(hidden2, output_shape)
+        self.fc2 = nn.Linear(z_dim, hidden2)
+        self.fc_decode = nn.Linear(hidden2, output_shape)
 
-  def encode(self, x: torch.Tensor):
-    h = F.relu(self.fc1(x))
+    def encode(self, x: torch.Tensor):
+        h = F.relu(self.fc1(x))
 
-    mu = self.fc_mu(h)
-    logvar = self.fc_logvar(h)
+        mu = self.fc_mu(h)
+        logvar = self.fc_logvar(h)
 
-    # deep vib eq. 19
-    sigma = F.softmax(logvar - 5.0, dim=1)
+        # deep vib eq. 19
+        sigma = F.softmax(logvar - 5.0, dim=1)
 
-    return mu, sigma
+        return mu, sigma
 
-  def reparameterize(self, mu: torch.Tensor, std: torch.Tensor):
-    eps = torch.randn_like(std)
-    return mu + eps * std
+    def reparameterize(self, mu: torch.Tensor, std: torch.Tensor):
+        eps = torch.randn_like(std)
+        return mu + eps * std
 
-  def decode(self, x: torch.Tensor):
-    h = F.relu(self.fc2(x))
-    logits = self.fc_decode(h)
-    return logits
+    def decode(self, x: torch.Tensor):
+        h = F.relu(self.fc2(x))
+        logits = self.fc_decode(h)
+        return logits
 
-  def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    x_flat = x.view(x.size(0), -1)
-    mu, sigma = self.encode(x_flat)
-    z = self.reparameterize(mu, sigma)
-    logits = self.decode(z)
-    return logits, mu, sigma
+    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        x_flat = x.view(x.size(0), -1)
+        mu, sigma = self.encode(x_flat)
+        z = self.reparameterize(mu, sigma)
+        logits = self.decode(z)
+        return logits, mu, sigma
 
 def vib_loss(
-    logits: torch.Tensor,
-    y: torch.Tensor,
-    mu: torch.Tensor,
-    sigma: torch.Tensor,
-    beta: float
+        logits: torch.Tensor,
+        y: torch.Tensor,
+        mu: torch.Tensor,
+        sigma: torch.Tensor,
+        beta: float
 ) -> torch.Tensor:
-  '''
-  ce: lower bound on I(Z;Y) (prediction)
-  kl: upper bound on I(Z;X) (compression)
-  # (beta bigger = more compression)
-  '''
-  ce_loss = F.cross_entropy(logits, y)
+    '''
+    ce: lower bound on I(Z;Y) (prediction)
+    kl: upper bound on I(Z;X) (compression)
+    # (beta bigger = more compression)
+    '''
+    ce_loss = F.cross_entropy(logits, y)
 
-  sigma = torch.clamp(sigma, 1e-10)
-  kl = -0.5*torch.sum(1 + 2*torch.log(sigma) - mu.pow(2) - sigma.pow(2), dim=1).mean()
+    sigma = torch.clamp(sigma, 1e-10)
+    kl = -0.5*torch.sum(1 + 2*torch.log(sigma) - mu.pow(2) - sigma.pow(2), dim=1).mean()
 
-  total_loss = ce_loss + beta*kl
+    total_loss = ce_loss + beta*kl
 
-  # TODO: return ce_loss and kl as well and analyze
-  return total_loss
+    # TODO: return ce_loss and kl as well and analyze
+    return total_loss
 
 def train_epoch(
-    model: nn.Module,
-    dataloader: DataLoader,
-    optimizer: optim.Optimizer,
-    device: torch.device,
-    beta: float
+        model: nn.Module,
+        dataloader: DataLoader,
+        optimizer: optim.Optimizer,
+        device: torch.device,
+        beta: float
 ) -> Tuple[float, float]:
-  model.train()
-  running_loss = 0.0
-  correct = 0
-  total = 0
+    model.train()
+    running_loss = 0.0
+    correct = 0
+    total = 0
 
-  for X, Y in (tq := tqdm(dataloader, desc='training', leave=False)):
-    X, Y = X.to(device), Y.to(device)
+    for X, Y in (tq := tqdm(dataloader, desc='training', leave=False)):
+        X, Y = X.to(device), Y.to(device)
 
-    optimizer.zero_grad()
+        optimizer.zero_grad()
 
-    logits, mu, sigma = model(X)
-    loss = vib_loss(logits, Y, mu, sigma, beta)
-    loss.backward()
-    optimizer.step()
+        logits, mu, sigma = model(X)
+        loss = vib_loss(logits, Y, mu, sigma, beta)
+        loss.backward()
+        optimizer.step()
 
-    # accumulate (note multiply nll by batch size to match previous running_loss scheme)
-    bs = X.size(0)
-    running_loss += loss.item() * bs
+        # accumulate (note multiply nll by batch size to match previous running_loss scheme)
+        bs = X.size(0)
+        running_loss += loss.item() * bs
 
-    _, preds = torch.max(logits, 1)
-    correct += (preds == Y).sum().item()
-    total += bs
+        _, preds = torch.max(logits, 1)
+        correct += (preds == Y).sum().item()
+        total += bs
 
-    tq.set_postfix({
-      'loss': f'{loss.item():.4f}',
-      'acc': f'{100.0 * correct / total:.2f}'
-    })
+        tq.set_postfix({
+            'loss': f'{loss.item():.4f}',
+            'acc': f'{100.0 * correct / total:.2f}'
+        })
 
-  avg_loss = running_loss / total
-  accuracy = 100.0 * correct / total
-  return avg_loss, accuracy
+    avg_loss = running_loss / total
+    accuracy = 100.0 * correct / total
+    return avg_loss, accuracy
 
 def evaluate(
-    model: nn.Module,
-    dataloader: DataLoader,
-    device: torch.device,
-    beta: float
+        model: nn.Module,
+        dataloader: DataLoader,
+        device: torch.device,
+        beta: float
 ) -> Tuple[float, float]:
-  model.eval()
-  running_loss = 0.0
-  correct = 0
-  total = 0
+    model.eval()
+    running_loss = 0.0
+    correct = 0
+    total = 0
 
-  with torch.no_grad():
-    for images, labels in dataloader:
-      images, labels = images.to(device), labels.to(device)
-      logits, mu, sigma = model(images)
-      loss = vib_loss(logits, labels, mu, sigma, beta)
+    with torch.no_grad():
+        for images, labels in dataloader:
+            images, labels = images.to(device), labels.to(device)
+            logits, mu, sigma = model(images)
+            loss = vib_loss(logits, labels, mu, sigma, beta)
 
-      bs = images.size(0)
-      running_loss += loss.item() * bs
+            bs = images.size(0)
+            running_loss += loss.item() * bs
 
-      _, preds = torch.max(logits, 1)
-      correct += (preds == labels).sum().item()
-      total += bs
+            _, preds = torch.max(logits, 1)
+            correct += (preds == labels).sum().item()
+            total += bs
 
-  avg_loss = running_loss / total
-  accuracy = 100.0 * correct / total
-  return avg_loss, accuracy
+    avg_loss = running_loss / total
+    accuracy = 100.0 * correct / total
+
+    return avg_loss, accuracy
 
 def train_model(
-    model: nn.Module,
-    train_loader: DataLoader,
-    test_loader: DataLoader,
-    optimizer: optim.Optimizer,
-    scheduler: Optional[optim.lr_scheduler.LRScheduler],
-    device: torch.device,
-    epochs: int,
-    beta: float,
+        model: nn.Module,
+        train_loader: DataLoader,
+        test_loader: DataLoader,
+        optimizer: optim.Optimizer,
+        scheduler: Optional[optim.lr_scheduler.LRScheduler],
+        device: torch.device,
+        epochs: int,
+        beta: float,
 ) -> Tuple[List[float], List[float]]:
-  model.to(device)
-  train_losses, test_losses = [], []
-  for epoch in range(epochs):
-    train_loss, train_acc = train_epoch(model, train_loader, optimizer, device, beta=beta)
-    test_loss, test_acc = evaluate(model, test_loader, device, beta=beta)
+    model.to(device)
+    train_losses, test_losses = [], []
+    for epoch in range(epochs):
+        train_loss, train_acc = train_epoch(model, train_loader, optimizer, device, beta=beta)
+        test_loss, test_acc = evaluate(model, test_loader, device, beta=beta)
 
-    if scheduler: scheduler.step()
+        if scheduler: scheduler.step()
 
-    print(f'''epoch [{epoch+1}/{epochs}] β({beta}) train loss: {train_loss:.3f} | train acc: {train_acc:.2f}%
-          \t    test loss: {test_loss:.3f} | test acc: {test_acc:.2f}%''')
-    train_losses.append(train_loss)
-    test_losses.append(test_loss)
+        print(f'''epoch [{epoch+1}/{epochs}] β({beta}) train loss: {train_loss:.3f} | train acc: {train_acc:.2f}%
+                    \t        test loss: {test_loss:.3f} | test acc: {test_acc:.2f}%''')
+        train_losses.append(train_loss)
+        test_losses.append(test_loss)
 
-  return train_losses, test_losses
+    return train_losses, test_losses
 
 def main() -> None:
-  parser = argparse.ArgumentParser(description='Training script with configurable hyperparameters.')
-  parser.add_argument('--beta', type=float, required=True, help='Beta coefficient')
-  parser.add_argument('--z_dim', type=int, default=75, help='Latent dimension size')
-  parser.add_argument('--hidden1', type=int, default=300, help='Size of first hidden layer')
-  parser.add_argument('--hidden2', type=int, default=100, help='Size of second hidden layer')
-  parser.add_argument('--epochs', type=int, default=200, help='Number of training epochs')
-  parser.add_argument('--rnd_seed', type=bool, default=False, help='Random torch seed or default of 42')
-  parser.add_argument('--learning_rate', type=float, default=1e-4, help='Learning rate')
-  parser.add_argument('--batch_size', type=int, default=64, help='Batch size')
-  args = parser.parse_args()
+    parser = argparse.ArgumentParser(description='Training script with configurable hyperparameters.')
+    parser.add_argument('--beta', type=float, required=True, help='Beta coefficient')
+    parser.add_argument('--z_dim', type=int, default=75, help='Latent dimension size')
+    parser.add_argument('--hidden1', type=int, default=300, help='Size of first hidden layer')
+    parser.add_argument('--hidden2', type=int, default=100, help='Size of second hidden layer')
+    parser.add_argument('--epochs', type=int, default=200, help='Number of training epochs')
+    parser.add_argument('--rnd_seed', type=bool, default=False, help='Random torch seed or default of 42')
+    parser.add_argument('--learning_rate', type=float, default=1e-4, help='Learning rate')
+    parser.add_argument('--batch_size', type=int, default=64, help='Batch size')
+    args = parser.parse_args()
 
-  if not args.rnd_seed:
-    torch.manual_seed(42)
-    if torch.cuda.is_available():
-      torch.cuda.manual_seed(42)
+    if not args.rnd_seed:
+        torch.manual_seed(42)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed(42)
 
-  beta = args.beta
-  z_dim = args.z_dim
-  hidden1 = args.hidden1
-  hidden2 = args.hidden2
-  learning_rate = args.learning_rate # 1e-4 in deep vib paper
-  batch_size = args.batch_size # 100 in deep vib paper
-  epochs = args.epochs # 200 in deep vib paper
-  device = get_device()
+    beta = args.beta
+    z_dim = args.z_dim
+    hidden1 = args.hidden1
+    hidden2 = args.hidden2
+    learning_rate = args.learning_rate # 1e-4 in deep vib paper
+    batch_size = args.batch_size # 100 in deep vib paper
+    epochs = args.epochs # 200 in deep vib paper
+    device = get_device()
 
-  save_dir = f'save_stats_weights/vib_mnist_{hidden1}_{hidden2}_{z_dim}_{beta}'
-  os.makedirs(save_dir, exist_ok=True)
+    save_dir = f'save_stats_weights/vib_mnist_{hidden1}_{hidden2}_{z_dim}_{beta}'
+    os.makedirs(save_dir, exist_ok=True)
 
-  print(
-      f'hyperparameters:\n'
-      f'  beta           = {beta}\n'
-      f'  z_dim          = {z_dim}\n'
-      f'  hidden1        = {hidden1}\n'
-      f'  hidden2        = {hidden2}\n'
-      f'  learning_rate  = {learning_rate}\n'
-      f'  epochs         = {epochs}\n'
-      f'  batch_size     = {batch_size}\n'
-      f'  device         = {device}\n'
-      f'  save_dir       = {save_dir}'
+    print(
+            f'hyperparameters:\n'
+            f'\tbeta          = {beta}\n'
+            f'\tz_dim         = {z_dim}\n'
+            f'\thidden1       = {hidden1}\n'
+            f'\thidden2       = {hidden2}\n'
+            f'\tlearning_rate = {learning_rate}\n'
+            f'\tepochs        = {epochs}\n'
+            f'\tbatch_size    = {batch_size}\n'
+            f'\tdevice        = {device}\n'
+            f'\tsave_dir      = {save_dir}'
+        )
+
+    dataset = MnistCsvDataset('data/mnist_data.csv')
+    train_size = int(0.8 * len(dataset))
+    test_size = len(dataset) - train_size
+    print(f'train set size: {train_size}, test set size: {test_size}')
+    train_dataset, test_dataset = random_split(dataset, [train_size, test_size])
+    train_loader = DataLoader(train_dataset, batch_size, shuffle=True)
+    test_loader = DataLoader(test_dataset, batch_size, shuffle=True)
+
+    model = VIBNet(z_dim, 784, hidden1, hidden2, 10)
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate, betas=(0.5, 0.999))
+    scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda epoch: 0.97** (epoch // 2))
+
+    train_losses, test_losses = train_model(
+            model,
+            train_loader,
+            test_loader,
+            optimizer,
+            scheduler,
+            device,
+            epochs,
+            beta=beta
     )
 
-  dataset = MnistCsvDataset('data/mnist_data.csv')
-  train_size = int(0.8 * len(dataset))
-  test_size = len(dataset) - train_size
-  print(f'train set size: {train_size}, test set size: {test_size}')
-  train_dataset, test_dataset = random_split(dataset, [train_size, test_size])
-  train_loader = DataLoader(train_dataset, batch_size, shuffle=True)
-  test_loader = DataLoader(test_dataset, batch_size, shuffle=True)
+    test_loss, test_acc = evaluate(model, test_loader, device, beta)
+    print(f'test loss: {test_loss}, test acc: {test_acc}')
 
-  model = VIBNet(z_dim, 784, hidden1, hidden2, 10)
-  optimizer = optim.Adam(model.parameters(), lr=learning_rate, betas=(0.5, 0.999))
-  scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda epoch: 0.97** (epoch // 2))
+    torch.save(model.state_dict(), f'{save_dir}/vib_mnist_{hidden1}_{hidden2}_{z_dim}_{beta}.pth')
 
-  train_losses, test_losses = train_model(
-      model,
-      train_loader,
-      test_loader,
-      optimizer,
-      scheduler,
-      device,
-      epochs,
-      beta=beta
-  )
+    with open(f'{save_dir}/vib_mnist_{hidden1}_{hidden2}_{z_dim}_{beta}_stats.json', 'w') as json_file:
+        json.dump({
+            'beta': beta,
+            'test_losses': test_losses,
+            'test_acc': test_acc,
+            'z_dim': z_dim,
+            'hidden1': hidden1,
+            'hidden2': hidden1,
+            'learning_rate': learning_rate,
+            'batch_size': batch_size,
+            'epochs': epochs,
+        }, json_file, indent=2)
 
-  test_loss, test_acc = evaluate(model, test_loader, device, beta)
-  print(f'test loss: {test_loss}, test acc: {test_acc}')
-
-  torch.save(model.state_dict(), f'{save_dir}/vib_mnist_{hidden1}_{hidden2}_{z_dim}_{beta}.pth')
-
-  with open(f'{save_dir}/vib_mnist_{hidden1}_{hidden2}_{z_dim}_{beta}_stats.json', 'w') as json_file:
-    json.dump({
-      'beta': beta,
-      'test_losses': test_losses,
-      'test_acc': test_acc,
-      'z_dim': z_dim,
-      'hidden1': hidden1,
-      'hidden2': hidden1,
-      'learning_rate': learning_rate,
-      'batch_size': batch_size,
-      'epochs': epochs,
-    }, json_file, indent=2)
-
-  epochs = len(test_losses)
-  plt.figure(figsize=(10, 6))
-  plt.plot(range(1, epochs + 1), train_losses, marker='o', linewidth=2, markersize=6, color='#1f77b4', label='Training Loss')
-  plt.plot(range(1, epochs + 1), test_losses, marker='o', linewidth=2, markersize=6, color='#ff7f0e', label='Test Loss')
-  plt.title(f'(vib_mnist_{hidden1}_{hidden2}_{z_dim}_{beta}) Loss', fontsize=16, fontweight='bold', pad=20)
-  plt.xlabel('Epoch', fontsize=14)
-  plt.ylabel('Loss', fontsize=14)
-  plt.grid(True, alpha=0.3)
-  plt.legend(fontsize=12)
-  plt.savefig(f'{save_dir}/vib_mnist_{hidden1}_{hidden2}_{z_dim}_{beta}_test_loss.png', dpi=300, bbox_inches='tight')
+    epochs = len(test_losses)
+    plt.figure(figsize=(10, 6))
+    plt.plot(range(1, epochs + 1), train_losses, marker='o', linewidth=2, markersize=6, color='#1f77b4', label='Training Loss')
+    plt.plot(range(1, epochs + 1), test_losses, marker='o', linewidth=2, markersize=6, color='#ff7f0e', label='Test Loss')
+    plt.title(f'(vib_mnist_{hidden1}_{hidden2}_{z_dim}_{beta}) Loss', fontsize=16, fontweight='bold', pad=20)
+    plt.xlabel('Epoch', fontsize=14)
+    plt.ylabel('Loss', fontsize=14)
+    plt.grid(True, alpha=0.3)
+    plt.legend(fontsize=12)
+    plt.savefig(f'{save_dir}/vib_mnist_{hidden1}_{hidden2}_{z_dim}_{beta}_test_loss.png', dpi=300, bbox_inches='tight')
 
 if __name__ == '__main__':
-  main()
+    main()
