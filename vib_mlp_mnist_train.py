@@ -87,9 +87,9 @@ def vib_loss(
     ce_loss = F.cross_entropy(logits, y)
 
     sigma = torch.clamp(sigma, 1e-10)
-    kl = -0.5*torch.sum(1 + 2*torch.log(sigma) - mu.pow(2) - sigma.pow(2), dim=1).mean()
+    kl = 0.5*torch.sum(1 + 2*torch.log(sigma) - mu.pow(2) - sigma.pow(2), dim=1).mean()
 
-    total_loss = ce_loss + beta*kl
+    total_loss = ce_loss - beta*kl
 
     # TODO: return ce_loss and kl as well and analyze
     return total_loss
