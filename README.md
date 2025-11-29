@@ -23,3 +23,5 @@
 - [ ] Try training with dropout too?
 
 - [ ] Inspect the layer after IB pruneability on different/bigger networks and datasets
+
+test
