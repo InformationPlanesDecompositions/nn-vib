@@ -2,20 +2,17 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 from torch.utils.data import Dataset, random_split, DataLoader
-import torch.nn.utils.prune as prune
 import numpy as np
 from tqdm import tqdm
-import copy
-import matplotlib.pyplot as plt
 from msc import get_device
 
 torch.manual_seed(42)
 device = get_device()
-print(f'using device: {device}')
+print(f"using device: {device}")
 
 class MnistCsvDataset(Dataset):
     def __init__(self, filepath: str):
-        data = np.loadtxt(filepath, delimiter=',', dtype=np.float32)
+        data = np.loadtxt(filepath, delimiter=",", dtype=np.float32)
         self.labels = torch.tensor(data[:, 0], dtype=torch.long)
         self.images = torch.tensor(data[:, 1:], dtype=torch.float32)
 
@@ -46,7 +43,7 @@ def train_epoch(model, dataloader: DataLoader, criterion, optimizer, device):
     correct = 0
     total = 0
 
-    for images, labels in (tq := tqdm(dataloader, desc='training', leave=False)):
+    for images, labels in (tq := tqdm(dataloader, desc="training", leave=False)):
         images, labels = images.to(device), labels.to(device)
 
         outputs = model(images)
@@ -62,8 +59,8 @@ def train_epoch(model, dataloader: DataLoader, criterion, optimizer, device):
         total += labels.size(0)
 
         tq.set_postfix({
-            'loss': f'{loss.item():.4f}',
-            'acc': f'{100.0 * correct / total:.2f}'
+            "loss": f"{loss.item():.4f}",
+            "acc": f"{100.0 * correct / total:.2f}"
         })
 
     avg_loss = running_loss / total
@@ -95,21 +92,21 @@ def train_model(model, train_loader, test_loader: DataLoader, criterion, optimiz
     model.to(device)
 
     for epoch in range(epochs):
-        print(f'epoch [{epoch+1}/{epochs}]')
+        print(f"epoch [{epoch+1}/{epochs}]")
 
         train_loss, train_acc = train_epoch(model, train_loader, criterion, optimizer, device)
         test_loss, test_acc = evaluate(model, test_loader, criterion, device)
 
         scheduler.step()
 
-        print(f'train loss: {train_loss:.4f} | train acc: {train_acc:.2f}%')
-        print(f'test    loss: {test_loss:.4f} | test    acc: {test_acc:.2f}%\n')
+        print(f"train loss: {train_loss:.4f} | train acc: {train_acc:.2f}%")
+        print(f"test    loss: {test_loss:.4f} | test    acc: {test_acc:.2f}%\n")
 
-if __name__ == '__main__':
-    dataset = MnistCsvDataset('data/mnist_data.csv')
+if __name__ == "__main__":
+    dataset = MnistCsvDataset("data/mnist_data.csv")
     train_size = int(0.8 * len(dataset))
     test_size = len(dataset) - train_size
-    print(f'train_size: {train_size}, test_size: {test_size}')
+    print(f"train_size: {train_size}, test_size: {test_size}")
 
     train_dataset, test_dataset = random_split(dataset, [train_size, test_size])
 
@@ -125,4 +122,4 @@ if __name__ == '__main__':
 
     train_model(model, train_loader, test_loader, criterion, optimizer, scheduler, device, epochs)
 
-    torch.save(model.state_dict(), 'save_stats_weights/vib_mnist_300_100_default_novib/vib_mnist_300_100_default_novib.pth')
+    torch.save(model.state_dict(), "../save_stats_weights/vib_mnist_300_100_default_novib/vib_mnist_300_100_default_novib.pth")
