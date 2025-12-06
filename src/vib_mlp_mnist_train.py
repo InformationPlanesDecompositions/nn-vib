@@ -34,7 +34,7 @@ class VIBNetParams:
     hidden1: int
     hidden2: int
 
-    learning_rate: float
+    lr: float
     lr_decay: bool
     batch_size: int
     epochs: int
@@ -48,7 +48,7 @@ class VIBNetParams:
                 z_dim = args.z_dim,
                 hidden1 = args.hidden1,
                 hidden2 = args.hidden2,
-                learning_rate = args.learning_rate,
+                lr = args.lr,
                 lr_decay = args.lr_decay,
                 batch_size = args.batch_size,
                 epochs = args.epochs,
@@ -56,7 +56,7 @@ class VIBNetParams:
         )
 
     def file_name(self) -> str:
-        return f"vib_mnist_{self.hidden1}_{self.hidden2}_{self.z_dim}_{self.beta}"
+        return f"vib_mnist_{self.hidden1}_{self.hidden2}_{self.z_dim}_{self.beta}_{self.lr}"
 
     def save_dir(self) -> str:
         s = f"save_stats_weights/{self.file_name()}"
@@ -73,7 +73,7 @@ class VIBNetParams:
                 "hidden1": self.hidden1,
                 "hidden2": self.hidden2,
 
-                "learning_rate": self.learning_rate,
+                "lr": self.lr,
                 "batch_size": self.batch_size,
                 "epochs": self.epochs,
         }
@@ -85,7 +85,7 @@ class VIBNetParams:
                 f"\tz_dim         = {self.z_dim}\n"
                 f"\thidden1       = {self.hidden1}\n"
                 f"\thidden2       = {self.hidden2}\n"
-                f"\tlearning_rate = {self.learning_rate}\n"
+                f"\tlr            = {self.lr}\n"
                 f"\tepochs        = {self.epochs}\n"
                 f"\tbatch_size    = {self.batch_size}\n"
                 f"\tdevice        = {self.device}\n"
@@ -280,7 +280,7 @@ def main() -> None:
     parser.add_argument("--hidden2", type=int, default=100, help="size of second hidden layer")
     parser.add_argument("--epochs", type=int, default=200, help="number of training epochs") # 200 in deep vib paper
     parser.add_argument("--rnd_seed", type=bool, default=False, help="random torch seed or default of 42")
-    parser.add_argument("--learning_rate", type=float, default=1e-3, help="learning rate") # 1e-4 in deep vib paper
+    parser.add_argument("--lr", type=float, default=1e-3, help="learning rate") # 1e-4 in deep vib paper
     parser.add_argument("--lr_decay", type=bool, default=False, help="Enable learning rate decay")
     parser.add_argument("--batch_size", type=int, default=100, help="batch size") # 100 in deep vib paper
     args = parser.parse_args()
@@ -304,7 +304,7 @@ def main() -> None:
 
     model = VIBNet(params.z_dim, 784, params.hidden1, params.hidden2, 10)
     print(f"# of model parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad)}")
-    optimizer = optim.Adam(model.parameters(), lr=params.learning_rate, betas=(0.5, 0.999))
+    optimizer = optim.Adam(model.parameters(), lr=params.lr, betas=(0.5, 0.999))
     scheduler = None
     if params.lr_decay:
         scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda epoch: 0.94 ** (epoch // 2))
@@ -320,7 +320,6 @@ def main() -> None:
 
     test_loss, _, _, test_acc = evaluate_epoch(model, test_loader, params.device, params.beta)
     print(f"test loss: {test_loss}, test acc: {test_acc}")
-    #print(f"total lr decay: {optimizer.param_groups[0]['lr']/params.learning_rate * 100:.2f}%")
 
     torch.save(model.state_dict(), f"{params.save_dir()}.pth")
     with open(f"{params.save_dir()}_stats.json", "w") as json_file:
