@@ -319,7 +319,7 @@ def main() -> None:
     )
 
     test_loss, _, _, test_acc = evaluate_epoch(model, test_loader, params.device, params.beta)
-    print(f"test loss: {test_loss}, test acc: {test_acc}")
+    print(f"lr: {params.lr}, test loss: {test_loss}, test acc: {test_acc}")
 
     torch.save(model.state_dict(), f"{params.save_dir()}.pth")
     with open(f"{params.save_dir()}_stats.json", "w") as json_file:
