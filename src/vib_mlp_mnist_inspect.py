@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 
 import copy
+import glob
 import torch
 import torch.nn.utils.prune as prune
-from torch import nn
 from torch.utils.data import random_split, DataLoader
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 from vib_mlp_mnist_train import VIBNet, evaluate_epoch, MnistCsvDataset
-from msc import plot_x_y, get_device, load_weights
+from msc import get_device, load_weights
 
 torch.manual_seed(42)
 device = get_device()
@@ -25,129 +25,136 @@ print(f"train_size: {train_size}, test_size: {test_size}")
 _, test_dataset = random_split(dataset, [train_size, test_size])
 test_loader = DataLoader(test_dataset, batch_size, shuffle=True)
 
-betas = [0.1, 0.05, 0.01, 0.005, 0.001, 0.0005]
+betas = [(0.02, 0.0001), (0.01, 5e-05), (0.005, 5e-05), (0.001, 5e-05), (0.0005, 5e-05), (0.0001, 1e-05)]
 z_dim, h1, h2, o_shape = 75, 300, 100, 10
 
-def weights_location(h1, h2, z_dim, beta):
-    var = lambda v, w, x, y: f"vib_mnist_{v}_{w}_{x}_{y}"
-    return f"save_stats_weights/{var(h1, h2, z_dim, beta)}/{var(h1, h2, z_dim, beta)}.pth"
+def weights_location(h1, h2, z_dim, beta, lr):
+    top_dir = "save_stats_weights"
+    var = lambda v, w, x, y, z: f"vib_mnist_{v}_{w}_{x}_{y}_{z}"
+    return f"{top_dir}/{var(h1, h2, z_dim, beta, lr)}/{var(h1, h2, z_dim, beta, lr)}.pth"
 
 layer_names = [
-    #"fc1",
-    #"fc_mu", "fc_logvar",
+    "fc1",
+    ("fc_mu", "fc_logvar"),
     "fc2",
     "fc_decode",
 ]
 
 # ------------------------------------------------------------------------------
 
-plt.figure(figsize=(10, 6))
 prune_percs = [i/20 for i in range(4, 21)]
 print(f"prune percs: {prune_percs}")
 
-for beta in tqdm(betas):
+def prune_model_per_layer(weights, axes, beta):
     model = VIBNet(z_dim, 784, h1, h2, o_shape).to(device)
-    weights = load_weights(weights_location(h1, h2, z_dim, beta), verbose=False)
     model.load_state_dict(weights)
-    pruned_acc_list = []
-    for prune_perc in prune_percs:
-        pruned_model = copy.deepcopy(model)
-        for layer_name in layer_names:
-            module = dict(pruned_model.named_modules())[layer_name]
-            prune.l1_unstructured(module, name="weight", amount=prune_perc)
 
-        test_loss, ce, kl, test_acc = evaluate_epoch(pruned_model, test_loader, device, beta=beta)
-        pruned_acc_list.append(test_acc)
+    for idx, layer_name in enumerate(layer_names):
+        pruned_acc_list = []
+        for prune_perc in prune_percs:
+            pruned_model = copy.deepcopy(model)
 
-    plt.plot(prune_percs, pruned_acc_list, label=f"{beta}", marker="o")
+            if isinstance(layer_name, tuple):
+                for sub_layer in layer_name:
+                    module = dict(pruned_model.named_modules())[sub_layer]
+                    prune.l1_unstructured(module, name="weight", amount=prune_perc)
+            else:
+                module = dict(pruned_model.named_modules())[layer_name]
+                prune.l1_unstructured(module, name="weight", amount=prune_perc)
 
-"""
-from lenet_300_100_mnist import LeNet, evaluate as lenet_evaluate
-lenet_model = LeNet()
-lenet_weights = load_weights("save_stats_weights/lenet_300_100/lenet_300_100.pth", verbose=False)
-lenet_model.load_state_dict(lenet_weights)
-lenet_pruned_acc_list = []
-for prune_perc in prune_percs:
-    lenet_pruned_model = copy.deepcopy(lenet_model)
-    for layer_name in layer_names:
-        module = dict(lenet_pruned_model.named_modules())[layer_name]
-        prune.l1_unstructured(module, name="weight", amount=prune_perc)
+            test_loss, ce, kl, test_acc = evaluate_epoch(pruned_model, test_loader, device, beta=beta)
+            pruned_acc_list.append(test_acc)
 
-    criterion = nn.NLLLoss()
-    test_loss, test_acc = lenet_evaluate(lenet_pruned_model, test_loader, criterion, device)
-    lenet_pruned_acc_list.append(test_acc)
+        layer_label = ', '.join(layer_name) if isinstance(layer_name, tuple) else layer_name
+        axes[idx].plot(prune_percs, pruned_acc_list, label=f"{beta}", marker="o")
+        axes[idx].set_xlabel("Pruned %")
+        axes[idx].set_ylabel("Test Accuracy")
+        axes[idx].set_title(f"Layer: {layer_label}")
+        axes[idx].grid(True, alpha=0.3)
 
-plt.plot(prune_percs, lenet_pruned_acc_list, label="lenet_300_100", marker="o")
-"""
+fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+axes = axes.flatten()
 
-plt.xlabel("Pruned %")
-plt.ylabel("Test Accuracy")
-plt.title(f"Test Accuracy vs Pruning Percentages ['{', '.join(layer_names)}']")
-plt.legend(title="β", bbox_to_anchor=(1.05, 1), loc="upper left")
-plt.grid(True, alpha=0.3)
+for beta, lr in tqdm(betas):
+    weights = load_weights(weights_location(h1, h2, z_dim, beta, lr), verbose=False)
+    prune_model_per_layer(weights, axes, beta)
+
+weights = load_weights("save_stats_weights/vib_mnist_300_100_75_0.01_0.0001_500/vib_mnist_300_100_75_0.01_0.0001.pth", verbose=False)
+prune_model_per_layer(weights, axes, 0.01)
+
+for ax in axes: ax.legend(title="β", bbox_to_anchor=(1.05, 1), loc="upper left")
+
 plt.tight_layout()
-plt.savefig(f"plots/vib_mnist_beta_vs_pruned_acc_{'_'.join(layer_names)}.png", dpi=300, bbox_inches="tight")
+plt.savefig(f"plots/vib_mnist_beta_vs_pruned_acc_per_layer.png", dpi=300, bbox_inches="tight")
 plt.show(block=block_plt)
 
 # ------------------------------------------------------------------------------
 
-all_weights_by_beta = []
+def hist_sort_per_layer(weights, beta, all_weights_by_layer):
+    model = VIBNet(z_dim, 784, h1, h2, o_shape).to(device)
+    model.load_state_dict(weights)
+
+    for idx, layer_name in enumerate(layer_names):
+        weight_values = []
+
+        # Handle tuple layer names
+        if isinstance(layer_name, tuple):
+            for sub_layer in layer_name:
+                module = dict(model.named_modules()).get(sub_layer)
+                if module is not None and hasattr(module, "weight") and module.weight is not None:
+                    weight_values.append(module.weight.data.flatten())
+        else:
+            module = dict(model.named_modules()).get(layer_name)
+            if module is not None and hasattr(module, "weight") and module.weight is not None:
+                weight_values.append(module.weight.data.flatten())
+
+        if weight_values:
+            layer_tensor = torch.cat(weight_values)
+            all_weights_by_layer[idx].append(layer_tensor.abs().cpu().numpy())
+
+all_weights_by_layer = [[] for _ in range(len(layer_names))]
 beta_labels = []
-for beta in tqdm(betas):
-    model = VIBNet(z_dim, 784, h1, h2, o_shape).to(device)
-    weights = load_weights(weights_location(h1, h2, z_dim, beta), verbose=False)
-    model.load_state_dict(weights)
 
-    weight_values = []
-    for layer_name in layer_names:
-        module = dict(model.named_modules()).get(layer_name)
-        if module is not None and hasattr(module, "weight") and module.weight is not None:
-            weight_values.append(module.weight.data.flatten())
+for beta, lr in tqdm(betas):
+    weights = load_weights(weights_location(h1, h2, z_dim, beta, lr), verbose=False)
+    hist_sort_per_layer(weights, beta, all_weights_by_layer)
+    if len(beta_labels) < len(betas) + 1:
+        beta_labels.append(str(beta))
 
-    beta_tensor = torch.cat(weight_values)
-    all_weights_by_beta.append(beta_tensor.abs().cpu().numpy())
-    beta_labels.append(str(beta))
+weights = load_weights("save_stats_weights/vib_mnist_300_100_75_0.01_0.0001_500/vib_mnist_300_100_75_0.01_0.0001.pth", verbose=False)
+hist_sort_per_layer(weights, 0.01, all_weights_by_layer)
+beta_labels.append("0.01")
 
-"""
-from lenet_300_100_mnist import LeNet, evaluate as lenet_evaluate
-lenet_model = LeNet()
-lenet_weights = load_weights("save_stats_weights/lenet_300_100/lenet_300_100.pth", verbose=False)
-lenet_model.load_state_dict(lenet_weights)
-weight_values = []
-for layer_name in layer_names:
-    module = dict(lenet_model.named_modules()).get(layer_name)
-    if module is not None and hasattr(module, "weight") and module.weight is not None:
-        weight_values.append(module.weight.data.flatten())
+fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+axes = axes.flatten()
 
-beta_tensor = torch.cat(weight_values)
-all_weights_by_beta.append(beta_tensor.abs().cpu().numpy())
-beta_labels.append("lenet_300_100")
-"""
+for idx, layer_name in enumerate(layer_names):
+    layer_label = ', '.join(layer_name) if isinstance(layer_name, tuple) else layer_name
 
-plt.figure(figsize=(10, 6))
+    axes[idx].boxplot(
+        all_weights_by_layer[idx],
+        vert=True,
+        patch_artist=True,
+        boxprops=dict(facecolor="lightblue", color="black"),
+        medianprops=dict(color="red"),
+        whiskerprops=dict(color="black"),
+        capprops=dict(color="black"),
+        flierprops=dict(marker="o", markerfacecolor="gray", markersize=3, alpha=0.6)
+    )
+    axes[idx].set_xticks(range(1, len(beta_labels) + 1))
+    axes[idx].set_xticklabels(beta_labels, rotation=45)
+    axes[idx].set_xlabel("Beta (β)")
+    axes[idx].set_ylabel("Weight Values")
+    axes[idx].set_title(f"Layer: {layer_label}")
+    axes[idx].grid(True, axis="y", alpha=0.3)
 
-plt.boxplot(
-    all_weights_by_beta,
-    vert=True,
-    patch_artist=True,
-    boxprops=dict(facecolor="lightblue", color="black"),
-    medianprops=dict(color="red"),
-    whiskerprops=dict(color="black"),
-    capprops=dict(color="black"),
-    flierprops=dict(marker="o", markerfacecolor="gray", markersize=3, alpha=0.6)
-)
-
-plt.xticks(ticks=range(1, len(beta_labels) + 1), labels=beta_labels, rotation=0)
-plt.xlabel("Beta (β)")
-plt.ylabel("Weight Values")
-plt.title(f"Distribution of Layer Weights per Beta ['{', '.join(layer_names)}']")
-plt.grid(True, axis="y", alpha=0.3)
 plt.tight_layout()
-plt.savefig(f"plots/vib_mnist_beta_weight_dist_{'_'.join(layer_names)}.png", dpi=300, bbox_inches="tight")
-plt.show(block=block_plt)
+plt.savefig(f"plots/vib_mnist_beta_weight_dist_per_layer.png", dpi=300, bbox_inches="tight")
+plt.show(block=True)
 
 # ------------------------------------------------------------------------------
 
+"""
 plt.figure(figsize=(10, 6))
 
 for weights, label in zip(all_weights_by_beta, beta_labels):
@@ -171,3 +178,4 @@ plt.grid(True, which="both", ls="-", alpha=0.2) # "both" grids for log scale
 plt.tight_layout()
 plt.savefig(f"plots/vib_mnist_beta_weight_hist_{'_'.join(layer_names)}.png", dpi=300, bbox_inches="tight")
 plt.show(block=True)
+"""

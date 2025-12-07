@@ -10,7 +10,7 @@ fi
 max_jobs=$1
 beta=$2
 
-learning_rates=(0.005 0.001 0.0005 0.0001 0.00005 0.00001)
+learning_rates=(0.001 0.0005 0.0001 0.00005 0.00001)
 
 echo "--- starting training runs for beta = ${beta} with a maximum of ${max_jobs} parallel jobs ---"
 
