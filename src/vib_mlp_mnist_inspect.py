@@ -8,7 +8,7 @@ from torch.utils.data import random_split, DataLoader
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 from vib_mlp_mnist_train import VIBNet, evaluate_epoch, MnistCsvDataset
-from msc import get_device, load_weights
+from msc import get_device, load_weights, weights_location
 
 torch.manual_seed(42)
 device = get_device()
@@ -27,11 +27,6 @@ test_loader = DataLoader(test_dataset, batch_size, shuffle=True)
 
 betas = [(0.02, 0.0001), (0.01, 5e-05), (0.005, 5e-05), (0.001, 5e-05), (0.0005, 5e-05), (0.0001, 1e-05)]
 z_dim, h1, h2, o_shape = 75, 300, 100, 10
-
-def weights_location(h1, h2, z_dim, beta, lr):
-    top_dir = "save_stats_weights"
-    var = lambda v, w, x, y, z: f"vib_mnist_{v}_{w}_{x}_{y}_{z}"
-    return f"{top_dir}/{var(h1, h2, z_dim, beta, lr)}/{var(h1, h2, z_dim, beta, lr)}.pth"
 
 layer_names = [
     "fc1",

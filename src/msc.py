@@ -129,3 +129,8 @@ class MnistCsvDataset(Dataset):
 
     def __getitem__(self, idx: int):
         return self.images[idx].view(1, 28, 28), self.labels[idx]
+
+def weights_location(h1, h2, z_dim, beta, lr):
+    top_dir = "save_stats_weights"
+    var = lambda v, w, x, y, z: f"vib_mnist_{v}_{w}_{x}_{y}_{z}"
+    return f"{top_dir}/{var(h1, h2, z_dim, beta, lr)}/{var(h1, h2, z_dim, beta, lr)}.pth"
