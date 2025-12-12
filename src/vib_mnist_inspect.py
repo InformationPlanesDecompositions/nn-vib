@@ -25,20 +25,20 @@ print(f"train_size: {train_size}, test_size: {test_size}")
 _, test_dataset = random_split(dataset, [train_size, test_size])
 test_loader = DataLoader(test_dataset, batch_size, shuffle=True)
 
-betas = [(0.02, 0.0001), (0.01, 5e-05), (0.005, 5e-05), (0.001, 5e-05), (0.0005, 5e-05), (0.0001, 1e-05)]
+#betas = [(0.02, 0.0001), (0.01, 5e-05), (0.005, 5e-05), (0.001, 5e-05), (0.0005, 5e-05), (0.0001, 1e-05)]
+betas = [(0.02, 0.0001), (0.01, 0.0001), (0.005, 0.0001), (0.001, 0.0001), (0.0005, 0.0001), (0.0001, 0.0001)]
 z_dim, h1, h2, o_shape = 75, 300, 100, 10
 
 layer_names = [
     "fc1",
-    ("fc_mu", "fc_logvar"),
+    "fc_mu",
     "fc2",
     "fc_decode",
 ]
 
 # ------------------------------------------------------------------------------
 
-prune_percs = [i/20 for i in range(4, 21)]
-print(f"prune percs: {prune_percs}")
+prune_percs = [0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75]
 
 def prune_model_per_layer(weights, axes, beta):
     model = VIBNet(z_dim, 784, h1, h2, o_shape).to(device)
@@ -58,12 +58,12 @@ def prune_model_per_layer(weights, axes, beta):
                 prune.l1_unstructured(module, name="weight", amount=prune_perc)
 
             test_loss, ce, kl, test_acc = evaluate_epoch(pruned_model, test_loader, device, beta=beta)
-            pruned_acc_list.append(test_acc)
+            pruned_acc_list.append(test_loss)
 
         layer_label = ', '.join(layer_name) if isinstance(layer_name, tuple) else layer_name
         axes[idx].plot(prune_percs, pruned_acc_list, label=f"{beta}", marker="o")
         axes[idx].set_xlabel("Pruned %")
-        axes[idx].set_ylabel("Test Accuracy")
+        axes[idx].set_ylabel("Test Loss")
         axes[idx].set_title(f"Layer: {layer_label}")
         axes[idx].grid(True, alpha=0.3)
 
@@ -74,13 +74,12 @@ for beta, lr in tqdm(betas):
     weights = load_weights(weights_location(h1, h2, z_dim, beta, lr), verbose=False)
     prune_model_per_layer(weights, axes, beta)
 
-weights = load_weights("save_stats_weights/vib_mnist_300_100_75_0.01_0.0001_500/vib_mnist_300_100_75_0.01_0.0001.pth", verbose=False)
-prune_model_per_layer(weights, axes, 0.01)
-
-for ax in axes: ax.legend(title="β", bbox_to_anchor=(1.05, 1), loc="upper left")
+for ax in axes:
+    ax.legend(title="β", bbox_to_anchor=(1.05, 1), loc="upper left")
+    #ax.set_yscale("log")
 
 plt.tight_layout()
-plt.savefig(f"plots/vib_mnist_beta_vs_pruned_acc_per_layer.png", dpi=300, bbox_inches="tight")
+plt.savefig(f"plots/vib_mnist_beta_vs_pruned_loss_per_layer.png", dpi=300, bbox_inches="tight")
 plt.show(block=block_plt)
 
 # ------------------------------------------------------------------------------
@@ -116,10 +115,6 @@ for beta, lr in tqdm(betas):
     if len(beta_labels) < len(betas) + 1:
         beta_labels.append(str(beta))
 
-weights = load_weights("save_stats_weights/vib_mnist_300_100_75_0.01_0.0001_500/vib_mnist_300_100_75_0.01_0.0001.pth", verbose=False)
-hist_sort_per_layer(weights, 0.01, all_weights_by_layer)
-beta_labels.append("0.01")
-
 fig, axes = plt.subplots(2, 2, figsize=(14, 10))
 axes = axes.flatten()
 
@@ -142,6 +137,7 @@ for idx, layer_name in enumerate(layer_names):
     axes[idx].set_ylabel("Weight Values")
     axes[idx].set_title(f"Layer: {layer_label}")
     axes[idx].grid(True, axis="y", alpha=0.3)
+    axes[idx].set_yscale("log")
 
 plt.tight_layout()
 plt.savefig(f"plots/vib_mnist_beta_weight_dist_per_layer.png", dpi=300, bbox_inches="tight")

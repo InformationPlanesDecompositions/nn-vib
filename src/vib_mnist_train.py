@@ -11,7 +11,7 @@ from torch import nn
 from torch import optim
 from torch.utils.data import random_split, DataLoader
 from tqdm import tqdm
-from msc import get_device, plot_information_plane, plot_losses, MnistCsvDataset
+from msc import get_device, plot_information_plane, plot_losses, MnistCsvDataset, FashionMnistIdxDataset
 
 @dataclass
 class VIBNetParams:
@@ -26,6 +26,7 @@ class VIBNetParams:
     epochs: int
 
     device: torch.device
+    rnd_seed: bool
 
     @classmethod
     def from_args(cls, args: argparse.Namespace):
@@ -39,6 +40,7 @@ class VIBNetParams:
                 batch_size = args.batch_size,
                 epochs = args.epochs,
                 device = get_device(),
+                rnd_seed = args.rnd_seed,
         )
 
     def file_name(self) -> str:
@@ -63,6 +65,8 @@ class VIBNetParams:
                 "lr": self.lr,
                 "batch_size": self.batch_size,
                 "epochs": self.epochs,
+
+                "rnd_seed": self.rnd_seed,
         }
 
     def __str__(self):
@@ -76,6 +80,7 @@ class VIBNetParams:
                 f"\tepochs        = {self.epochs}\n"
                 f"\tbatch_size    = {self.batch_size}\n"
                 f"\tdevice        = {self.device}\n"
+                f"\trnd_seed      = {self.rnd_seed}\n"
                 f"\tsave_dir      = {self.save_dir()}"
         )
 
@@ -140,7 +145,7 @@ def vib_loss(
     ce = F.cross_entropy(logits, y)
 
     variance = sigma.pow(2)
-    log_variance = 2 * torch.log(sigma)
+    log_variance = 2*torch.log(sigma)
 
     kl_terms = 0.5 * (variance + mu.pow(2) - 1.0 - log_variance)
     kl = torch.sum(kl_terms, dim=1).mean()
@@ -242,10 +247,10 @@ def train_model(
 def main() -> None:
     parser = argparse.ArgumentParser(description="training script with configurable hyperparameters.")
     parser.add_argument("--beta", type=float, required=True, help="beta coefficient")
-    parser.add_argument("--z_dim", type=int, default=75, help="latent dimension size")
-    parser.add_argument("--hidden1", type=int, default=300, help="size of first hidden layer")
-    parser.add_argument("--hidden2", type=int, default=100, help="size of second hidden layer")
-    parser.add_argument("--epochs", type=int, default=500, help="number of training epochs") # 200 in deep vib paper
+    parser.add_argument("--z_dim", type=int, default=125, help="latent dimension size")
+    parser.add_argument("--hidden1", type=int, default=500, help="size of first hidden layer")
+    parser.add_argument("--hidden2", type=int, default=300, help="size of second hidden layer")
+    parser.add_argument("--epochs", type=int, default=1000, help="number of training epochs") # 200 in deep vib paper
     parser.add_argument("--rnd_seed", type=bool, default=False, help="random torch seed or default of 42")
     parser.add_argument("--lr", type=float, default=1e-4, help="learning rate") # 1e-4 in deep vib paper
     parser.add_argument("--lr_decay", type=bool, default=False, help="Enable learning rate decay")
@@ -260,12 +265,8 @@ def main() -> None:
     params = VIBNetParams.from_args(args)
     print(params)
 
-    dataset = MnistCsvDataset("data/mnist_data.csv")
-    train_size = int(0.8 * len(dataset))
-    test_size = len(dataset) - train_size
-    print(f"train set size: {train_size}, test set size: {test_size}")
-    train_dataset, test_dataset = random_split(dataset, [train_size, test_size])
-
+    train_dataset = FashionMnistIdxDataset("data/mnist_fashion/", train=True)
+    test_dataset = FashionMnistIdxDataset("data/mnist_fashion/", train=False)
     train_loader = DataLoader(train_dataset, params.batch_size, shuffle=True)
     test_loader = DataLoader(test_dataset, params.batch_size, shuffle=True)
 
@@ -274,7 +275,7 @@ def main() -> None:
     optimizer = optim.Adam(model.parameters(), lr=params.lr, betas=(0.5, 0.999))
     scheduler = None
     if params.lr_decay:
-        scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda epoch: 0.94 ** (epoch // 2))
+        scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda epoch: 0.95 ** (epoch // 8))
 
     train_losses, test_losses, test_ces, test_kls = train_model(
             model,
@@ -295,4 +296,5 @@ def main() -> None:
     plot_losses(test_losses, train_losses, params.file_name(), params.save_dir())
     plot_information_plane(test_ces, test_kls, params.save_dir())
 
-if __name__ == "__main__": main()
+if __name__ == "__main__":
+    main()

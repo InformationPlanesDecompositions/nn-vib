@@ -1,5 +1,7 @@
 #!/bin/bash
 
+# TODO: add a start and stop date/time
+
 if [ -z "$1" ] || [ -z "$2" ]; then
     echo "usage: $0 <num_jobs> <beta_value>"
     echo "example (2 parallel jobs): $0 2 0.1"

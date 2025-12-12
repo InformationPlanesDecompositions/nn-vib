@@ -1,3 +1,4 @@
+import os, gzip
 from typing import List, Optional
 import torch
 from torch.utils.data import Dataset
@@ -62,7 +63,7 @@ def plot_information_plane(ces: List[float], kls: List[float], save_dir: str):
     assert len(ces) == len(kls)
 
     i_x_t = np.array(kls)
-    i_t_y = np.array([-ce for ce in ces])
+    i_t_y = np.array(ces)
     epochs = np.arange(len(i_x_t))
     num_epochs = len(epochs)
 
@@ -129,6 +130,50 @@ class MnistCsvDataset(Dataset):
 
     def __getitem__(self, idx: int):
         return self.images[idx].view(1, 28, 28), self.labels[idx]
+
+def idx_extractor(filepath: str) -> np.ndarray:
+    open_func = gzip.open if filepath.endswith('.gz') else open
+
+    with open_func(filepath, 'rb') as f:
+        magic = int.from_bytes(f.read(4), 'big')
+
+        num_dimensions = magic % 256
+
+        dimensions = []
+        for _ in range(num_dimensions):
+            dimensions.append(int.from_bytes(f.read(4), 'big'))
+
+        data = np.frombuffer(f.read(), dtype=np.uint8)
+
+    return data.reshape(dimensions)
+
+class FashionMnistIdxDataset(Dataset):
+    def __init__(self, data_dir: str, train: bool = True):
+        # Determine file prefixes based on whether we want train or test data
+        prefix = 'train' if train else 't10k'
+
+        # Construct full file paths
+        images_filepath = os.path.join(data_dir, f'{prefix}-images-idx3-ubyte')
+        labels_filepath = os.path.join(data_dir, f'{prefix}-labels-idx1-ubyte')
+
+        if not os.path.exists(images_filepath) or not os.path.exists(labels_filepath):
+            raise FileNotFoundError(
+                f"Could not find required files in '{data_dir}'. "
+                f"Expected: {os.path.basename(images_filepath)} and {os.path.basename(labels_filepath)}"
+            )
+
+        images_np = idx_extractor(images_filepath)
+        labels_np = idx_extractor(labels_filepath)
+        self.images = torch.from_numpy(images_np).float().div(255.0)
+        self.labels = torch.from_numpy(labels_np).long()
+
+    def __len__(self) -> int:
+        return len(self.labels)
+
+    def __getitem__(self, idx: int):
+        image = self.images[idx].view(1, 28, 28)
+        label = self.labels[idx]
+        return image, label
 
 def weights_location(h1, h2, z_dim, beta, lr):
     top_dir = "save_stats_weights"

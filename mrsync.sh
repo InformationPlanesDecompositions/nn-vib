@@ -9,4 +9,5 @@ rsync -av \
     --exclude='vib_lenet_old/' \
     --exclude='save_stats_weights' \
     --exclude='plots/' \
+    --exclude='saved_plots/' \
     ./ conqueror-home:dev/nn-vib
