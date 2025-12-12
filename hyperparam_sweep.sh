@@ -19,7 +19,7 @@ echo "--- starting training runs for beta = ${beta} with a maximum of ${max_jobs
 for lr in "${learning_rates[@]}"; do
     echo "submitting job for lr = ${lr}"
 
-    ./src/vib_mlp_mnist_train.py --beta "${beta}" --lr "${lr}" &
+    ./src/vib_mnist_train.py --beta "${beta}" --lr "${lr}" &
 
     while (( $(jobs -r | wc -l) >= max_jobs )); do
         wait -n

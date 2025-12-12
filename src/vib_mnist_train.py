@@ -250,7 +250,7 @@ def main() -> None:
     parser.add_argument("--z_dim", type=int, default=125, help="latent dimension size")
     parser.add_argument("--hidden1", type=int, default=500, help="size of first hidden layer")
     parser.add_argument("--hidden2", type=int, default=300, help="size of second hidden layer")
-    parser.add_argument("--epochs", type=int, default=1000, help="number of training epochs") # 200 in deep vib paper
+    parser.add_argument("--epochs", type=int, default=800, help="number of training epochs") # 200 in deep vib paper
     parser.add_argument("--rnd_seed", type=bool, default=False, help="random torch seed or default of 42")
     parser.add_argument("--lr", type=float, default=1e-4, help="learning rate") # 1e-4 in deep vib paper
     parser.add_argument("--lr_decay", type=bool, default=False, help="Enable learning rate decay")

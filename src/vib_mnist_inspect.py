@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 
 import copy
-import glob
 import torch
 import torch.nn.utils.prune as prune
 from torch.utils.data import random_split, DataLoader
@@ -27,7 +26,7 @@ test_loader = DataLoader(test_dataset, batch_size, shuffle=True)
 
 #betas = [(0.02, 0.0001), (0.01, 5e-05), (0.005, 5e-05), (0.001, 5e-05), (0.0005, 5e-05), (0.0001, 1e-05)]
 betas = [(0.02, 0.0001), (0.01, 0.0001), (0.005, 0.0001), (0.001, 0.0001), (0.0005, 0.0001), (0.0001, 0.0001)]
-z_dim, h1, h2, o_shape = 75, 300, 100, 10
+z_dim, h1, h2, o_shape = 125, 500, 300, 10
 
 layer_names = [
     "fc1",
