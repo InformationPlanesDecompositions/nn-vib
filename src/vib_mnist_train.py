@@ -154,13 +154,10 @@ def train_epoch(
         optimizer: optim.Optimizer,
         device: torch.device,
         beta: float
-) -> Tuple[float, float, float, float]:
+) -> Tuple[float, float]:
     model.train()
 
     running_loss = 0.0
-    running_ce = 0.0
-    running_kl = 0.0
-
     correct = 0
     total = 0
 
@@ -170,15 +167,13 @@ def train_epoch(
         optimizer.zero_grad()
 
         logits, mu, sigma = model(X)
-        ce, kl, loss = vib_loss(logits, Y, mu, sigma, beta)
+        _, _, loss = vib_loss(logits, Y, mu, sigma, beta)
         loss.backward()
         optimizer.step()
 
         # accumulate (note multiply nll by batch size to match previous running_loss scheme)
         bs = X.size(0)
         running_loss += loss.item() * bs
-        running_ce += ce.item()
-        running_kl += kl.item()
 
         _, preds = torch.max(logits, 1)
         correct += (preds == Y).sum().item()
@@ -190,10 +185,8 @@ def train_epoch(
         })
 
     avg_loss = running_loss / total
-    avg_ce = running_ce / total
-    avg_kl = running_kl / total
     accuracy = 100.0 * correct / total
-    return avg_loss, avg_ce, avg_kl, accuracy
+    return avg_loss, accuracy
 
 def evaluate_epoch(
         model: nn.Module,
@@ -203,34 +196,19 @@ def evaluate_epoch(
 ) -> Tuple[float, float, float, float]:
     model.eval()
 
-    running_loss = 0.0
-    running_ce = 0.0
-    running_kl = 0.0
-
-    correct = 0
-    total = 0
-
     with torch.no_grad():
-        for images, labels in dataloader:
-            images, labels = images.to(device), labels.to(device)
-            logits, mu, sigma = model(images)
-            ce, kl, loss = vib_loss(logits, labels, mu, sigma, beta)
+        batches = list(dataloader)
+        Xs, Ys = zip(*batches)
+        X = torch.cat(Xs, dim=0).to(device)
+        Y = torch.cat(Ys, dim=0).to(device)
 
-            bs = images.size(0)
-            running_loss += loss.item() * bs
-            running_ce += ce.item()
-            running_kl += kl.item()
+        logits, mu, sigma = model(X)
+        ce, kl, loss = vib_loss(logits, Y, mu, sigma, beta)
 
-            _, preds = torch.max(logits, 1)
-            correct += (preds == labels).sum().item()
-            total += bs
+        _, preds = torch.max(logits, 1)
+        acc = 100.0 * (preds == Y).float().mean().item()
 
-    avg_loss = running_loss / total
-    avg_ce = running_ce / total
-    avg_kl = running_kl / total
-    accuracy = 100.0 * correct / total
-
-    return avg_loss, avg_ce, avg_kl, accuracy
+    return loss.item(), ce.item(), kl.item(), acc
 
 def train_model(
         model: nn.Module,
@@ -245,8 +223,8 @@ def train_model(
     model.to(device)
     train_losses, test_losses, test_ces, test_kls = [], [], [], []
     for epoch in range(epochs):
-        train_loss, _, _, train_acc = train_epoch(model, train_loader, optimizer, device, beta=beta)
-        test_loss, test_ce, test_kl, test_acc = evaluate_epoch(model, test_loader, device, beta=beta)
+        train_loss, train_acc = train_epoch(model, train_loader, optimizer, device, beta=beta)
+        test_loss, ce, kl, test_acc = evaluate_epoch(model, test_loader, device, beta=beta)
         if scheduler:
             scheduler.step()
             print(f"lr: {optimizer.param_groups[0]['lr']:.10f}")
@@ -256,8 +234,8 @@ def train_model(
         train_losses.append(train_loss)
         test_losses.append(test_loss)
 
-        test_ces.append(test_ce)
-        test_kls.append(test_kl)
+        test_ces.append(ce)
+        test_kls.append(kl)
 
     return train_losses, test_losses, test_ces, test_kls
 
@@ -267,7 +245,7 @@ def main() -> None:
     parser.add_argument("--z_dim", type=int, default=75, help="latent dimension size")
     parser.add_argument("--hidden1", type=int, default=300, help="size of first hidden layer")
     parser.add_argument("--hidden2", type=int, default=100, help="size of second hidden layer")
-    parser.add_argument("--epochs", type=int, default=200, help="number of training epochs") # 200 in deep vib paper
+    parser.add_argument("--epochs", type=int, default=500, help="number of training epochs") # 200 in deep vib paper
     parser.add_argument("--rnd_seed", type=bool, default=False, help="random torch seed or default of 42")
     parser.add_argument("--lr", type=float, default=1e-4, help="learning rate") # 1e-4 in deep vib paper
     parser.add_argument("--lr_decay", type=bool, default=False, help="Enable learning rate decay")
