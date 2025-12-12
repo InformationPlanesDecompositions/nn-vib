@@ -7,7 +7,7 @@ import torch.nn.utils.prune as prune
 from torch.utils.data import random_split, DataLoader
 import matplotlib.pyplot as plt
 from tqdm import tqdm
-from vib_mlp_mnist_train import VIBNet, evaluate_epoch, MnistCsvDataset
+from vib_mnist_train import VIBNet, evaluate_epoch, MnistCsvDataset
 from msc import get_device, load_weights, weights_location
 
 torch.manual_seed(42)

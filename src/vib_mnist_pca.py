@@ -11,7 +11,7 @@ from tqdm import tqdm
 from torch.utils.data import DataLoader, random_split
 from torchvision import datasets, transforms
 from msc import get_device, load_weights, weights_location, MnistCsvDataset
-from vib_mlp_mnist_train import VIBNet
+from vib_mnist_train import VIBNet
 
 DEVICE = get_device()
 

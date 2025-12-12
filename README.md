@@ -13,4 +13,4 @@ source .venv/bin/activate
     - (implying some beta better than others for use cases)
 - [ ] increase model size to over parameterize
 - [ ] inspect better generalization for pruned over parameterized IB networks
-- [ ] plot original model as well
+- [ ] plot original model as well (ie. beta == 0.0)
