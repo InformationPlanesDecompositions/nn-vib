@@ -3,10 +3,10 @@
 import copy
 import torch
 import torch.nn.utils.prune as prune
-from torch.utils.data import random_split, DataLoader
+from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
 from tqdm import tqdm
-from vib_mnist_train import VIBNet, evaluate_epoch, MnistCsvDataset
+from vib_mnist_train import VIBNet, evaluate_epoch, FashionMnistIdxDataset
 from msc import get_device, load_weights, weights_location
 
 torch.manual_seed(42)
@@ -14,14 +14,11 @@ device = get_device()
 print(f"using device: {device}")
 
 block_plt = False
-
-dataset = MnistCsvDataset("data/mnist_data.csv")
-train_size = int(0.8 * len(dataset))
-test_size = len(dataset) - train_size
 batch_size = 100
-print(f"train_size: {train_size}, test_size: {test_size}")
 
-_, test_dataset = random_split(dataset, [train_size, test_size])
+train_dataset = FashionMnistIdxDataset("data/mnist_fashion/", train=True)
+test_dataset = FashionMnistIdxDataset("data/mnist_fashion/", train=False)
+train_loader = DataLoader(train_dataset, batch_size, shuffle=True)
 test_loader = DataLoader(test_dataset, batch_size, shuffle=True)
 
 #betas = [(0.02, 0.0001), (0.01, 5e-05), (0.005, 5e-05), (0.001, 5e-05), (0.0005, 5e-05), (0.0001, 1e-05)]
@@ -38,6 +35,8 @@ layer_names = [
 # ------------------------------------------------------------------------------
 
 prune_percs = [0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75]
+
+# TODO: compare train and test loss diffs
 
 def prune_model_per_layer(weights, axes, beta):
     model = VIBNet(z_dim, 784, h1, h2, o_shape).to(device)
