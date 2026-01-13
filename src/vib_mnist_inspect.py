@@ -21,20 +21,21 @@ test_dataset = FashionMnistIdxDataset("data/mnist_fashion/", train=False)
 train_loader = DataLoader(train_dataset, batch_size, shuffle=True)
 test_loader = DataLoader(test_dataset, batch_size, shuffle=True)
 
-#betas = [(0.02, 0.0001), (0.01, 5e-05), (0.005, 5e-05), (0.001, 5e-05), (0.0005, 5e-05), (0.0001, 1e-05)]
-betas = [(0.02, 0.0001), (0.01, 0.0001), (0.005, 0.0001), (0.001, 0.0001), (0.0005, 0.0001), (0.0001, 0.0001)]
+betas = [(0.4, 0.0001), (0.3, 0.0001), (0.2, 0.0001), (0.1, 0.0005), (0.05, 0.0005), (0.01, 0.001), (0.005, 0.0005), (0.001, 0.0005), (0.0, 0.0001)]
 z_dim, h1, h2, o_shape = 125, 500, 300, 10
 
 layer_names = [
     "fc1",
-    "fc_mu",
+    ("fc_mu", "fc_logvar"),
     "fc2",
     "fc_decode",
 ]
 
 # ------------------------------------------------------------------------------
 
-prune_percs = [0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75]
+#prune_percs = [0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75]
+prune_percs = [i/30 for i in range(6, 30)]
+print(f"prune percs: {prune_percs}")
 
 # TODO: compare train and test loss diffs
 
@@ -74,6 +75,7 @@ for beta, lr in tqdm(betas):
 
 for ax in axes:
     ax.legend(title="β", bbox_to_anchor=(1.05, 1), loc="upper left")
+    ax.invert_yaxis()
     #ax.set_yscale("log")
 
 plt.tight_layout()

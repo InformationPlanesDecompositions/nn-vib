@@ -107,6 +107,7 @@ def plot_information_plane(ces: List[float], kls: List[float], save_dir: str):
     plt.savefig(f"{save_dir}_info_plane.png", dpi=300)
     plt.close()
 
+# TODO: plot ce, kl, loss for both test and train so 2 sub plots
 def plot_losses(test_losses: List[float], train_losses: List[float], file_name: str, save_dir: str) -> None:
     epochs = len(test_losses)
     plt.figure(figsize=(10, 6))
@@ -132,29 +133,22 @@ class MnistCsvDataset(Dataset):
         return self.images[idx].view(1, 28, 28), self.labels[idx]
 
 def idx_extractor(filepath: str) -> np.ndarray:
-    open_func = gzip.open if filepath.endswith('.gz') else open
-
-    with open_func(filepath, 'rb') as f:
-        magic = int.from_bytes(f.read(4), 'big')
-
+    open_func = gzip.open if filepath.endswith(".gz") else open
+    with open_func(filepath, "rb") as f:
+        magic = int.from_bytes(f.read(4), "big")
         num_dimensions = magic % 256
-
         dimensions = []
-        for _ in range(num_dimensions):
-            dimensions.append(int.from_bytes(f.read(4), 'big'))
-
+        for _ in range(num_dimensions): dimensions.append(int.from_bytes(f.read(4), "big"))
         data = np.frombuffer(f.read(), dtype=np.uint8)
 
     return data.reshape(dimensions)
 
 class FashionMnistIdxDataset(Dataset):
     def __init__(self, data_dir: str, train: bool = True):
-        # Determine file prefixes based on whether we want train or test data
-        prefix = 'train' if train else 't10k'
+        prefix = "train" if train else "t10k"
 
-        # Construct full file paths
-        images_filepath = os.path.join(data_dir, f'{prefix}-images-idx3-ubyte')
-        labels_filepath = os.path.join(data_dir, f'{prefix}-labels-idx1-ubyte')
+        images_filepath = os.path.join(data_dir, f"{prefix}-images-idx3-ubyte")
+        labels_filepath = os.path.join(data_dir, f"{prefix}-labels-idx1-ubyte")
 
         if not os.path.exists(images_filepath) or not os.path.exists(labels_filepath):
             raise FileNotFoundError(
