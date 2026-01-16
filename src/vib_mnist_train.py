@@ -97,6 +97,7 @@ class VIBNet(nn.Module):
 
         self.fc1 = nn.Linear(input_shape, hidden1)
 
+        # TODO: possible do this in one layer half/half so that svd/pruning is easier/contained
         self.fc_mu = nn.Linear(hidden1, z_dim)
         self.fc_logvar = nn.Linear(hidden1, z_dim)
 

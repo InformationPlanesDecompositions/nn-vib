@@ -26,7 +26,8 @@ z_dim, h1, h2, o_shape = 125, 500, 300, 10
 
 layer_names = [
     "fc1",
-    ("fc_mu", "fc_logvar"),
+    "fc_mu",
+    "fc_logvar",
     "fc2",
     "fc_decode",
 ]
