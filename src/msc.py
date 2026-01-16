@@ -158,8 +158,8 @@ class FashionMnistIdxDataset(Dataset):
 
         images_np = idx_extractor(images_filepath)
         labels_np = idx_extractor(labels_filepath)
-        self.images = torch.from_numpy(images_np).float().div(255.0)
-        self.labels = torch.from_numpy(labels_np).long()
+        self.images = torch.from_numpy(images_np.copy()).float().div(255.0)
+        self.labels = torch.from_numpy(labels_np.copy()).long()
 
     def __len__(self) -> int:
         return len(self.labels)

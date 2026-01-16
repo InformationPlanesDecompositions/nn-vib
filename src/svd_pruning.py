@@ -64,16 +64,19 @@ class LowRankLinear(nn.Module):
 # --------------------- SVD PRUNE WHOLE NETWORK ------------------------
 
 beta, lr = 0.001, 0.0005
+#beta, lr = 0.0, 0.0001
 weights = load_weights(weights_location(h1, h2, z_dim, beta, lr), verbose=False)
 model = VIBNet(z_dim, 784, h1, h2, o_shape).to(device)
 model.load_state_dict(weights)
+train_loss, ce, kl, train_acc = evaluate_epoch(model, train_loader, device, beta=beta)
 test_loss, ce, kl, test_acc = evaluate_epoch(model, test_loader, device, beta=beta)
 og_param_count = count_params(model)
 print(f"size of model before prune: {og_param_count}")
+print(f"original: train_loss = {train_loss:.3f}, train_acc = {train_acc:.2f}%")
 print(f"original: test_loss = {test_loss:.3f}, test_acc = {test_acc:.2f}%")
 print()
 
-layer_names_w_thresh = [("fc1", 1.0), ("fc_mu", 0.92), ("fc_logvar", 0.92), ("fc2", 0.92), ("fc_decode", 1.0)]
+layer_names_w_thresh = [("fc1", 1.0), ("fc_mu", 1.0), ("fc_logvar", 1.0), ("fc2", 0.65), ("fc_decode", 1.0)]
 svd_results = svd(model, layer_names)
 for idx, (layer_name, thresh) in enumerate(layer_names_w_thresh):
     U = svd_results[layer_name]["U"]
@@ -106,9 +109,11 @@ for idx, (layer_name, thresh) in enumerate(layer_names_w_thresh):
 
 n_param_count = count_params(model)
 param_perc_diff = (og_param_count - n_param_count)/og_param_count * 100
+train_loss, ce, kl, train_acc = evaluate_epoch(model, train_loader, device, beta=beta)
 test_loss, ce, kl, test_acc = evaluate_epoch(model, test_loader, device, beta=beta)
 print()
 print(f"size of model after prune: {n_param_count}, pruned: {param_perc_diff:.2f}% of total weights")
+print(f"original: train_loss = {train_loss:.3f}, train_acc = {train_acc:.2f}%")
 print(f"pruned: test_loss = {test_loss:.3f}, test_acc = {test_acc:.2f}%")
 
 exit(1)
