@@ -76,7 +76,7 @@ print(f"original: train_loss = {train_loss:.3f}, train_acc = {train_acc:.2f}%")
 print(f"original: test_loss = {test_loss:.3f}, test_acc = {test_acc:.2f}%")
 print()
 
-layer_names_w_thresh = [("fc1", 1.0), ("fc_mu", 1.0), ("fc_logvar", 1.0), ("fc2", 0.65), ("fc_decode", 1.0)]
+layer_names_w_thresh = [("fc1", 1.0), ("fc_mu", 0.95), ("fc_logvar", 0.9), ("fc2", 0.65), ("fc_decode", 1.0)]
 svd_results = svd(model, layer_names)
 for idx, (layer_name, thresh) in enumerate(layer_names_w_thresh):
     U = svd_results[layer_name]["U"]
