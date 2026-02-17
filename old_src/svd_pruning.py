@@ -34,6 +34,9 @@ def count_params(model):
 def get_pruning_threshold(s_vals, energy_threshold: float):
     assert(energy_threshold <= 1.0)
     if energy_threshold <= 0: return 1
+    # For SVD, per-component "energy" is proportional to sigma^2.
+    # Example: energy_threshold=0.90 means keep the smallest rank k whose
+    # cumulative sigma^2 reaches 90% of the layer's total sigma^2.
     energy = s_vals**2
     total_energy = torch.sum(energy)
     cumulative_energy = torch.cumsum(energy, dim=0) / total_energy
@@ -76,6 +79,8 @@ print(f"original: train_loss = {train_loss:.3f}, train_acc = {train_acc:.2f}%")
 print(f"original: test_loss = {test_loss:.3f}, test_acc = {test_acc:.2f}%")
 print()
 
+# Thresholds are "variance retained" per layer (not fraction of weights kept).
+# So 0.90 keeps enough singular directions to retain 90% energy; 0.60 is more aggressive.
 layer_names_w_thresh = [("fc1", 1.0), ("fc_mu", 0.95), ("fc_logvar", 0.9), ("fc2", 0.65), ("fc_decode", 1.0)]
 svd_results = svd(model, layer_names)
 for idx, (layer_name, thresh) in enumerate(layer_names_w_thresh):
@@ -116,7 +121,7 @@ print(f"size of model after prune: {n_param_count}, pruned: {param_perc_diff:.2f
 print(f"original: train_loss = {train_loss:.3f}, train_acc = {train_acc:.2f}%")
 print(f"pruned: test_loss = {test_loss:.3f}, test_acc = {test_acc:.2f}%")
 
-exit(1)
+#exit(1)
 
 # ------------------------------------------------------------------------------
 
@@ -161,9 +166,9 @@ plt.show()
 
 # ---------------------- SVD PRUNING ----------------------
 
-# we use energy thresholds as our "pruning" metric
-# 1.0 = no pruning, 0.1 = keep only 10% of variance
-energy_levels = [1.0, 0.99, 0.98, 0.97, 0.96, 0.95]
+# We prune by retained SVD energy (sum of kept sigma^2 / total sigma^2).
+# 1.0 ~= no pruning; 0.6 means keep enough components to explain 60% variance.
+energy_levels = [1.0, 0.99, 0.98, 0.97, 0.96, 0.95, 0.9, 0.85, 0.80]
 
 def svd_prune_model_per_layer(weights_path, axes, beta):
     model = VIBNet(z_dim, 784, h1, h2, o_shape).to(device)

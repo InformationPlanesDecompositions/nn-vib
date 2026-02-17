@@ -38,8 +38,6 @@ layer_names = [
 prune_percs = [i/30 for i in range(6, 30)]
 print(f"prune percs: {prune_percs}")
 
-# TODO: compare train and test loss diffs
-
 def prune_model_per_layer(weights, axes, beta):
     model = VIBNet(z_dim, 784, h1, h2, o_shape).to(device)
     model.load_state_dict(weights)
