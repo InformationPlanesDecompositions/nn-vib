@@ -10,6 +10,7 @@
   - Look at much smaller `z_dim`
 - [ ] Look at pruning whole neurons?
 - [ ] Heat map of weight matrices to actually see what SVD base directions are indicating
+- [ ] Make ib layer one matrix?
 
 ### New testing infra:
 - `src/mlp_ib.py`, `src/cnn_ib.py`:
@@ -34,4 +35,8 @@
     but for the cnn I guess make the `hidden1` actually just conv layers?
 - `src/train.py`: choose between either model and be able to pass in all parameters via cli
 
-
+### Questions/Suspicions
+- It seems as though everything after the bottleneck layer including the bottleneck layer (except
+  the final decode layer) is much more sparse and pruneable?
+- How does the model know to basically skip using all other weights and sort of thread a needle through
+  only 4 specific neurons?
