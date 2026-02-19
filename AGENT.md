@@ -10,6 +10,9 @@
 - avoid unnecessary abstractions and keep implementations direct
 - prefer readable, minimal code over verbose patterns
 - always use double quotes where possible
+- never use double new line spacing between any blocks of code
+- do not use any formatting tools
+- when making edits, only edit specific parts, no need to change whole file
 
 ## Comments and Docs
 - comments must be lowercase
@@ -21,5 +24,5 @@
 - use type hints for classes and large or complex functions when they improve clarity
 
 ## Line Length
-- if a line exceeds 100 characters, split it across multiple lines
+- if a line exceeds 120 characters, split it across multiple lines
 - for long function calls, place each parameter on its own line

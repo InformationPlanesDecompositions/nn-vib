@@ -1,4 +1,6 @@
 import os, gzip
+import argparse
+from dataclasses import dataclass
 from typing import List, Optional
 import torch
 from torch.utils.data import Dataset
@@ -31,13 +33,25 @@ def plot_x_y(
 
   if point_labels:
     for x, y in zip(xs, ys1):
-      ax.text(x, y, f"({x:.4f}, {y:.2f})", fontsize=8,
-              verticalalignment="bottom", horizontalalignment="right")
+      ax.text(
+        x,
+        y,
+        f"({x:.4f}, {y:.2f})",
+        fontsize=8,
+        verticalalignment="bottom",
+        horizontalalignment="right",
+      )
 
       if ys2:
         for x, y in zip(xs, ys2):
-          ax.text(x, y, f"({x:.4f}, {y:.2f})", fontsize=8,
-                  verticalalignment="top", horizontalalignment="left")
+          ax.text(
+            x,
+            y,
+            f"({x:.4f}, {y:.2f})",
+            fontsize=8,
+            verticalalignment="top",
+            horizontalalignment="left",
+          )
 
   ax.legend()
   return fig, ax
@@ -49,13 +63,83 @@ def get_device():
   else: device = "cpu"
   return torch.device(device)
 
+@dataclass
+class VIBNetParams:
+  model_name: str
+  beta: float
+  z_dim: int
+  hidden1: int
+  hidden2: int
+  lr: float
+  batch_size: int
+  epochs: int
+  device: torch.device
+  rnd_seed: bool
+
+  @classmethod
+  def from_args(cls, args: argparse.Namespace, model_name: str):
+    return cls(
+      model_name=model_name,
+      beta=args.beta,
+      z_dim=args.z_dim,
+      hidden1=args.hidden1,
+      hidden2=args.hidden2,
+      lr=args.lr,
+      batch_size=args.batch_size,
+      epochs=args.epochs,
+      device=get_device(),
+      rnd_seed=args.rnd_seed,
+    )
+
+  def file_name(self) -> str:
+    return f"vib_{self.model_name}_{self.hidden1}_{self.hidden2}_{self.z_dim}_{self.beta}_{self.lr}_{self.epochs}"
+
+  def save_dir(self) -> str:
+    s = f"save_stats_weights/{self.file_name()}"
+    os.makedirs(s, exist_ok=True)
+    return f"{s}/{self.file_name()}"
+
+  def to_json(self, test_losses, test_accuracy, ce_kls):
+    return {
+      "test_losses": test_losses,
+      "test_acc": test_accuracy,
+      "ce_kls": ce_kls,
+      "beta": self.beta,
+      "z_dim": self.z_dim,
+      "hidden1": self.hidden1,
+      "hidden2": self.hidden2,
+      "lr": self.lr,
+      "batch_size": self.batch_size,
+      "epochs": self.epochs,
+      "rnd_seed": self.rnd_seed,
+    }
+
+  def __str__(self):
+    return (
+      f"hyperparameters:\n"
+      f"\tmodel         = {self.model_name}\n"
+      f"\tbeta          = {self.beta}\n"
+      f"\tz_dim         = {self.z_dim}\n"
+      f"\thidden1       = {self.hidden1}\n"
+      f"\thidden2       = {self.hidden2}\n"
+      f"\tlr            = {self.lr}\n"
+      f"\tepochs        = {self.epochs}\n"
+      f"\tbatch_size    = {self.batch_size}\n"
+      f"\tdevice        = {self.device}\n"
+      f"\trnd_seed      = {self.rnd_seed}\n"
+      f"\tsave_dir      = {self.save_dir()}"
+    )
+
 def load_weights(filepath, verbose=True):
   weights = torch.load(filepath, map_location="cpu")
-  if verbose: print(f"loaded object type: {type(weights)}")
+  if verbose:
+    print(f"loaded object type: {type(weights)}")
   if isinstance(weights, dict):
-    if verbose: print("keys in the weights file:")
+    if verbose:
+      print("keys in the weights file:")
     for key in weights.keys():
-      if verbose: print(f"- {key} with shape {weights[key].shape}")
+      if verbose:
+        print(f"- {key} with shape {weights[key].shape}")
 
   return weights
 
@@ -76,13 +160,13 @@ def plot_information_plane(ces: List[float], kls: List[float], save_dir: str):
   for i in range(num_epochs - 1):
     color = cmap_instance(norm(epochs[i]))
     plt.plot(
-      i_x_t[i:i+2],
-      i_t_y[i:i+2],
+      i_x_t[i : i + 2],
+      i_t_y[i : i + 2],
       color=color,
       linestyle="-",
       linewidth=2,
       alpha=0.7,
-      zorder=1
+      zorder=1,
     )
 
   scatter = plt.scatter(
@@ -94,7 +178,7 @@ def plot_information_plane(ces: List[float], kls: List[float], save_dir: str):
     marker="o",
     s=50,
     alpha=1.0,
-    zorder=2
+    zorder=2,
   )
 
   cbar = plt.colorbar(scatter)
@@ -108,11 +192,32 @@ def plot_information_plane(ces: List[float], kls: List[float], save_dir: str):
   plt.close()
 
 # TODO: plot ce, kl, loss for both test and train so 2 sub plots
-def plot_losses(test_losses: List[float], train_losses: List[float], file_name: str, save_dir: str) -> None:
+def plot_losses(
+  test_losses: List[float],
+  train_losses: List[float],
+  file_name: str,
+  save_dir: str,
+) -> None:
   epochs = len(test_losses)
   plt.figure(figsize=(10, 6))
-  plt.plot(range(1, epochs + 1), train_losses, marker="o", linewidth=2, markersize=6, color="#1f77b4", label="training Loss")
-  plt.plot(range(1, epochs + 1), test_losses, marker="o", linewidth=2, markersize=6, color="#ff7f0e", label="test Loss")
+  plt.plot(
+    range(1, epochs + 1),
+    train_losses,
+    marker="o",
+    linewidth=2,
+    markersize=6,
+    color="#1f77b4",
+    label="training Loss",
+  )
+  plt.plot(
+    range(1, epochs + 1),
+    test_losses,
+    marker="o",
+    linewidth=2,
+    markersize=6,
+    color="#ff7f0e",
+    label="test Loss",
+  )
   plt.title(f"({file_name}) loss", fontsize=16, fontweight="bold", pad=20)
   plt.xlabel("epoch", fontsize=14)
   plt.ylabel("loss", fontsize=14)
@@ -136,7 +241,8 @@ def idx_extractor(filepath: str) -> np.ndarray:
     magic = int.from_bytes(f.read(4), "big")
     num_dimensions = magic % 256
     dimensions = []
-    for _ in range(num_dimensions): dimensions.append(int.from_bytes(f.read(4), "big"))
+    for _ in range(num_dimensions):
+      dimensions.append(int.from_bytes(f.read(4), "big"))
     data = np.frombuffer(f.read(), dtype=np.uint8)
 
   return data.reshape(dimensions)

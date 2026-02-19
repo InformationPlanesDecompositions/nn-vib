@@ -16,3 +16,10 @@ dependencies = [
     "torchviz>=0.0.3",
     "tqdm>=4.67.1",
 ]
+
+[tool.ruff]
+indent-width = 2
+line-length = 120
+
+[tool.ruff.format]
+quote-style = "double"
