@@ -123,10 +123,11 @@ def indices_above_avg_abs_threshold(
   return top_dict
 
 layers = ["fc_mu", "fc_logvar"]
+n = 10
 to_prune_neurons = {}
 for layer in layers:
-  indicies = indices_above_avg_abs_threshold(model, layer, 4, axis="row")
-  to_prune_neurons[layer] = list(indicies.keys())
+  indices = indices_above_avg_abs_threshold(model, layer, n, axis="row")
+  to_prune_neurons[layer] = list(indices.keys())
   print("---")
 
 print(to_prune_neurons)
