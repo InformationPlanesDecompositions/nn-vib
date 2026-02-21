@@ -1,6 +1,9 @@
+#!/usr/bin/env python3
+import argparse
 import torch
 import torch.nn.functional as F
 from torch import nn
+from msc import VIBNetParams, CIFAR10Dataset, run_training_job
 
 class VIBNet(nn.Module):
   def __init__(
@@ -41,3 +44,21 @@ class VIBNet(nn.Module):
     z = self.reparameterize(mu, sigma)
     logits = self.decode(z)
     return logits, mu, sigma
+
+if __name__ == "__main__":
+  parser = argparse.ArgumentParser(description="mlp vib training with configurable hyperparameters.")
+  parser.add_argument("--beta", type=float, required=True, help="beta coefficient")
+  parser.add_argument("--z_dim", type=int, required=True, default=128, help="latent dimension size")
+  parser.add_argument("--hidden1", type=int, required=True, default=1024, help="size of first hidden layer")
+  parser.add_argument("--hidden2", type=int, required=True, default=512, help="size of second hidden layer")
+  parser.add_argument("--epochs", type=int, required=True, default=200, help="number of training epochs")
+  parser.add_argument("--rnd_seed", type=bool, default=False, help="random torch seed or default of 42")
+  parser.add_argument("--lr", type=float, default=2e-4, help="learning rate")
+  parser.add_argument("--batch_size", type=int, default=128, help="batch size")
+  parser.add_argument("--data_dir", type=str, default="data/CIFAR-10/", help="dataset path")
+  args = parser.parse_args()
+  params = VIBNetParams.from_args(args, "mlp")
+  model = VIBNet(params.z_dim, 3072, params.hidden1, params.hidden2, 10)
+  train_dataset = CIFAR10Dataset(args.data_dir, train=True)
+  test_dataset = CIFAR10Dataset(args.data_dir, train=False)
+  run_training_job(model, params, train_dataset, test_dataset)

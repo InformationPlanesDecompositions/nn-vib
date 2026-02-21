@@ -1,7 +1,8 @@
 ## Plan
 
 ### Todo/Plan Information Bottleneck Pruning
-- [ ] What does pruning look like in an IB CNN?
+- [ ] What does pruning look like in convolutional layers?
+- [ ] What does inspection look like in convolutional layers?
 - [ ] Train IB MLP and IB CNN
   - 3 different sizes with 5 different random seeds
   - FashionMNIST

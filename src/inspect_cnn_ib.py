@@ -10,9 +10,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from copy import deepcopy
 from torch.utils.data import DataLoader
-from train import evaluate_epoch, FashionMnistIdxDataset
-from mlp_ib import VIBNet
-from msc import get_device
+from msc import evaluate_epoch, CIFAR10Dataset, get_device
+from cnn_ib import VIBNet
 
 torch.set_printoptions(
   threshold=float("inf"),
@@ -23,8 +22,8 @@ torch.set_printoptions(
 os.makedirs("plots", exist_ok=True)
 
 o_shape = 10
-i_shape = 784
-parser = argparse.ArgumentParser(description="inspect and prune saved vib model layers")
+input_shape = (3, 32, 32)
+parser = argparse.ArgumentParser(description="inspect and prune saved cnn vib model layers")
 parser.add_argument(
   "--run_dir",
   type=str,
@@ -48,8 +47,8 @@ if not match:
     f"got: {run_name}"
   )
 model_name, h1_s, h2_s, z_dim_s, beta_s, _, _ = match.groups()
-if model_name != "mlp":
-  raise ValueError(f"this script currently supports mlp runs only, got model: {model_name}")
+if model_name != "cnn":
+  raise ValueError(f"this script currently supports cnn runs only, got model: {model_name}")
 h1 = int(h1_s)
 h2 = int(h2_s)
 z_dim = int(z_dim_s)
@@ -60,12 +59,18 @@ if not pth_candidates:
   raise FileNotFoundError(f"no .pth file found in: {run_dir}")
 weights_path = os.path.join(run_dir, pth_candidates[0])
 weights = torch.load(weights_path, map_location="cpu")
-model = VIBNet(z_dim, i_shape, h1, h2, o_shape)
+model = VIBNet(z_dim, input_shape, h1, h2, o_shape)
 model.load_state_dict(weights)
 
 # ---------- inspecting weight matrices via heat map ----------
+def get_heatmap_matrix(module: nn.Module) -> np.ndarray:
+  matrix = module.weight.detach().cpu()
+  if isinstance(module, nn.Conv2d):
+    return matrix.view(matrix.shape[0], -1).numpy()
+  return matrix.numpy()
+
 def plot_weight_heatmaps(model: nn.Module, file_name: str, cmap: str = "viridis") -> None:
-  layers = [(name, module) for name, module in model.named_modules() if isinstance(module, nn.Linear)]
+  layers = [(name, module) for name, module in model.named_modules() if isinstance(module, (nn.Conv2d, nn.Linear))]
   if not layers:
     return
 
@@ -77,7 +82,7 @@ def plot_weight_heatmaps(model: nn.Module, file_name: str, cmap: str = "viridis"
   axes = np.array(axes).reshape(-1)
 
   for i, (name, module) in enumerate(layers):
-    matrix = module.weight.detach().cpu().numpy()
+    matrix = get_heatmap_matrix(module)
     im = axes[i].imshow(matrix, aspect="auto", cmap=cmap)
     total_params = sum(p.numel() for p in module.parameters())
     axes[i].set_title(f"{name} ({total_params} params)")
@@ -135,21 +140,21 @@ print(to_prune_neurons)
 # ---------- full network magnitude pruning ----------
 def magnitude_prune_top_percent(model: nn.Module, p: float) -> None:
   for name, module in model.named_modules():
-    if name in ["fc_decode", "fc1"]: continue
-    if isinstance(module, nn.Linear):
+    if name in ["fc_decode"]: continue
+    if isinstance(module, (nn.Conv2d, nn.Linear)):
       prune.l1_unstructured(module, name="weight", amount=p)
       prune.remove(module, "weight")
 
 device = get_device()
 test_loader = DataLoader(
-  FashionMnistIdxDataset("data/mnist_fashion/", train=False),
+  CIFAR10Dataset("data/CIFAR-10/", train=False),
   batch_size=100,
   shuffle=False
 )
 base_loss, _, _, base_acc = evaluate_epoch(model.to(device), test_loader, device, beta=beta)
 print(f"before prune: loss={base_loss:.6f}, acc={base_acc:.2f}")
 for pct in [0.95, 0.90, 0.85, 0.80, 0.75, 0.70, 0.65, 0.60, 0.55]:
-  pruned_model = VIBNet(z_dim, 784, h1, h2, o_shape).to(device)
+  pruned_model = VIBNet(z_dim, input_shape, h1, h2, o_shape).to(device)
   pruned_model.load_state_dict(weights)
   magnitude_prune_top_percent(pruned_model, pct)
   loss, _, _, acc = evaluate_epoch(pruned_model, test_loader, device, beta=beta)
@@ -199,6 +204,5 @@ pruned_loss, _, _, pruned_acc = evaluate_epoch(
   beta=beta
 )
 print(f"dict prune: loss={pruned_loss:.6f}, acc={pruned_acc:.2f}")
-#print(dict(dict_pruned_model.named_modules())["fc_mu"].weight)
 
 input("press enter to terminate...") # to keep any plots still open

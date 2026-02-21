@@ -1,11 +1,14 @@
-import os, gzip
+import os, gzip, pickle, json
 import argparse
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List, Optional, Tuple
 import torch
-from torch.utils.data import Dataset
+import torch.nn.functional as F
+from torch import nn, optim
+from torch.utils.data import Dataset, DataLoader
 import numpy as np
 import matplotlib.pyplot as plt
+from tqdm import tqdm
 
 def plot_x_y(
   xs: List,
@@ -272,7 +275,176 @@ class FashionMnistIdxDataset(Dataset):
     label = self.labels[idx]
     return image, label
 
+class CIFAR10Dataset(Dataset):
+  """ https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz """
+  def __init__(self, data_dir: str, train: bool = True):
+    self.data_dir = data_dir
+    batch_files = [f"data_batch_{i}" for i in range(1, 6)] if train else ["test_batch"]
+    image_batches, label_batches = [], []
+
+    for batch_file in batch_files:
+      batch_path = os.path.join(self.data_dir, batch_file)
+      if not os.path.exists(batch_path):
+        raise FileNotFoundError(
+          f"Could not find required file '{batch_file}' in '{self.data_dir}'"
+        )
+      with open(batch_path, "rb") as f:
+        batch = pickle.load(f, encoding="bytes")
+      data = batch[b"data"] if b"data" in batch else batch["data"]
+      labels = batch[b"labels"] if b"labels" in batch else batch["labels"]
+      image_batches.append(data)
+      label_batches.append(labels)
+
+    images_np = np.vstack(image_batches).astype(np.float32)
+    labels_np = np.array(sum(label_batches, []), dtype=np.int64)
+    images_np = images_np.reshape(-1, 3, 32, 32) / 255.0
+
+    self.images = torch.from_numpy(images_np.copy())
+    self.labels = torch.from_numpy(labels_np.copy())
+
+  def __len__(self) -> int: return len(self.labels)
+
+  def __getitem__(self, idx: int):
+    return self.images[idx], self.labels[idx]
+
 def weights_location(h1, h2, z_dim, beta, lr):
   top_dir = "save_stats_weights"
   var = lambda v, w, x, y, z: f"vib_mnist_{v}_{w}_{x}_{y}_{z}"
   return f"{top_dir}/{var(h1, h2, z_dim, beta, lr)}/{var(h1, h2, z_dim, beta, lr)}.pth"
+
+def vib_loss(
+  logits: torch.Tensor,
+  y: torch.Tensor,
+  mu: torch.Tensor,
+  sigma: torch.Tensor,
+  beta: float,
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+  ce = F.cross_entropy(logits, y)
+  variance = sigma.pow(2)
+  log_variance = 2 * torch.log(sigma)
+  kl_terms = 0.5 * (variance + mu.pow(2) - 1.0 - log_variance)
+  kl = torch.sum(kl_terms, dim=1).mean()
+  total_loss = ce + beta * kl
+  return ce, kl, total_loss
+
+def train_epoch(
+  model: nn.Module,
+  dataloader: DataLoader,
+  optimizer: optim.Optimizer,
+  device: torch.device,
+  beta: float,
+) -> Tuple[float, float]:
+  model.train()
+  running_loss = 0.0
+  correct = 0
+  total = 0
+  for X, Y in (tq := tqdm(dataloader, desc="training", leave=False)):
+    X, Y = X.to(device), Y.to(device)
+    optimizer.zero_grad()
+    logits, mu, sigma = model(X)
+    _, _, loss = vib_loss(logits, Y, mu, sigma, beta)
+    loss.backward()
+    optimizer.step()
+    bs = X.size(0)
+    running_loss += loss.item() * bs
+    _, preds = torch.max(logits, 1)
+    correct += (preds == Y).sum().item()
+    total += bs
+    tq.set_postfix(
+      {
+        "loss": f"{loss.item():.4f}",
+        "acc": f"{100.0 * correct / total:.2f}",
+      }
+    )
+  avg_loss = running_loss / total
+  accuracy = 100.0 * correct / total
+  return avg_loss, accuracy
+
+def evaluate_epoch(
+  model: nn.Module,
+  dataloader: DataLoader,
+  device: torch.device,
+  beta: float,
+) -> Tuple[float, float, float, float]:
+  model.eval()
+  with torch.no_grad():
+    batches = list(dataloader)
+    Xs, Ys = zip(*batches)
+    X = torch.cat(Xs, dim=0).to(device)
+    Y = torch.cat(Ys, dim=0).to(device)
+    logits, mu, sigma = model(X)
+    ce, kl, loss = vib_loss(logits, Y, mu, sigma, beta)
+    _, preds = torch.max(logits, 1)
+    acc = 100.0 * (preds == Y).float().mean().item()
+  return loss.item(), ce.item(), kl.item(), acc
+
+def train_model(
+  model: nn.Module,
+  train_loader: DataLoader,
+  test_loader: DataLoader,
+  optimizer: optim.Optimizer,
+  device: torch.device,
+  epochs: int,
+  beta: float,
+) -> Tuple[List[float], List[float], List[float], List[float]]:
+  model.to(device)
+  train_losses, test_losses, test_ces, test_kls = [], [], [], []
+  for epoch in range(epochs):
+    train_loss, train_acc = train_epoch(
+      model,
+      train_loader,
+      optimizer,
+      device,
+      beta=beta,
+    )
+    test_loss, ce, kl, test_acc = evaluate_epoch(
+      model,
+      test_loader,
+      device,
+      beta=beta,
+    )
+    print(
+      f"""epoch [{epoch + 1}/{epochs}] β({beta}) train loss: {train_loss:.3f} | train acc: {train_acc:.2f}%
+\t\t\ttest loss: {test_loss:.3f} | test acc: {test_acc:.2f}%"""
+    )
+    train_losses.append(train_loss)
+    test_losses.append(test_loss)
+    test_ces.append(ce)
+    test_kls.append(kl)
+  return train_losses, test_losses, test_ces, test_kls
+
+def run_training_job(
+  model: nn.Module,
+  params: VIBNetParams,
+  train_dataset: Dataset,
+  test_dataset: Dataset,
+) -> None:
+  if not params.rnd_seed:
+    torch.manual_seed(42)
+    if torch.cuda.is_available():
+      torch.cuda.manual_seed(42)
+  print(params)
+  train_loader = DataLoader(train_dataset, params.batch_size, shuffle=True)
+  test_loader = DataLoader(test_dataset, params.batch_size, shuffle=True)
+  print(f"# of model parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad)}")
+  optimizer = optim.Adam(model.parameters(), lr=params.lr, betas=(0.5, 0.999))
+  train_losses, test_losses, test_ces, test_kls = train_model(
+    model,
+    train_loader,
+    test_loader,
+    optimizer,
+    params.device,
+    params.epochs,
+    beta=params.beta,
+  )
+  test_loss, _, _, test_acc = evaluate_epoch(model, test_loader, params.device, params.beta)
+  print(f"lr: {params.lr}, test loss: {test_loss}, test acc: {test_acc}")
+  torch.save(model.state_dict(), f"{params.save_dir()}.pth")
+  with open(f"{params.save_dir()}_stats.json", "w") as json_file:
+    json.dump(
+      params.to_json(test_losses, test_acc, list(zip(test_ces, test_kls))),
+      json_file,
+      indent=2,
+    )
+  plot_losses(test_losses, train_losses, params.file_name(), params.save_dir())
+  plot_information_plane(test_ces, test_kls, params.save_dir())
