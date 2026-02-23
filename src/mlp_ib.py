@@ -3,7 +3,7 @@ import argparse
 import torch
 import torch.nn.functional as F
 from torch import nn
-from msc import VIBNetParams, CIFAR10Dataset, run_training_job
+from msc import VIBNetParams, CIFAR10Dataset, run_training_job, FashionMnistIdxDataset
 
 class VIBNet(nn.Module):
   def __init__(
@@ -58,7 +58,9 @@ if __name__ == "__main__":
   parser.add_argument("--data_dir", type=str, default="data/CIFAR-10/", help="dataset path")
   args = parser.parse_args()
   params = VIBNetParams.from_args(args, "mlp")
-  model = VIBNet(params.z_dim, 3072, params.hidden1, params.hidden2, 10)
-  train_dataset = CIFAR10Dataset(args.data_dir, train=True)
-  test_dataset = CIFAR10Dataset(args.data_dir, train=False)
+  #train_dataset = CIFAR10Dataset(args.data_dir, train=True)
+  #test_dataset = CIFAR10Dataset(args.data_dir, train=False)
+  train_dataset = FashionMnistIdxDataset("data/mnist_fashion/", train=True)
+  test_dataset = FashionMnistIdxDataset("data/mnist_fashion/", train=False)
+  model = VIBNet(params.z_dim, 784, params.hidden1, params.hidden2, 10)
   run_training_job(model, params, train_dataset, test_dataset)
