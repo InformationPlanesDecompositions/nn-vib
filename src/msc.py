@@ -385,6 +385,7 @@ def evaluate_epoch(
     dataloader: DataLoader,
     device: torch.device,
     beta: float,
+    mc_samples: int = 10,
 ) -> Tuple[float, float, float, float]:
     model.eval()
     with torch.no_grad():
@@ -393,8 +394,18 @@ def evaluate_epoch(
         X = torch.cat(Xs, dim=0).to(device)
         Y = torch.cat(Ys, dim=0).to(device)
         logits, mu, sigma = model(X)
-        ce, kl, loss = vib_loss(logits, Y, mu, sigma, beta)
-        _, preds = torch.max(logits, 1)
+        probs_sum = F.softmax(logits, dim=1)
+        for _ in range(mc_samples - 1):
+            logits, _, _ = model(X)
+            probs_sum += F.softmax(logits, dim=1)
+        probs = probs_sum / mc_samples
+        ce = F.nll_loss(torch.log(probs.clamp_min(1e-8)), Y)
+        variance = sigma.pow(2)
+        log_variance = 2 * torch.log(sigma)
+        kl_terms = 0.5 * (variance + mu.pow(2) - 1.0 - log_variance)
+        kl = torch.sum(kl_terms, dim=1).mean()
+        loss = ce + beta * kl
+        _, preds = torch.max(probs, 1)
         acc = 100.0 * (preds == Y).float().mean().item()
     return loss.item(), ce.item(), kl.item(), acc
 
@@ -447,7 +458,7 @@ def run_training_job(
             torch.cuda.manual_seed(42)
     print(params)
     train_loader = DataLoader(train_dataset, params.batch_size, shuffle=True)
-    test_loader = DataLoader(test_dataset, params.batch_size, shuffle=True)
+    test_loader = DataLoader(test_dataset, params.batch_size, shuffle=False)
     print(f"# of model parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad)}")
     optimizer = optim.Adam(model.parameters(), lr=params.lr, betas=(0.5, 0.999))
     train_losses, test_losses, test_ces, test_kls = train_model(
