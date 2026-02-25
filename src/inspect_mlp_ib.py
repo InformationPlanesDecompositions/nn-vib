@@ -138,7 +138,7 @@ device = get_device()
 test_loader = DataLoader(FashionMnistIdxDataset("data/mnist_fashion/", train=False), batch_size=100, shuffle=False)
 base_loss, _, _, base_acc = evaluate_epoch(model.to(device), test_loader, device, beta=beta)
 print(f"before prune: loss={base_loss:.6f}, acc={base_acc:.2f}")
-for pct in [0.95, 0.90, 0.85, 0.80, 0.75, 0.70, 0.65, 0.60, 0.55]:
+for pct in [0.95, 0.90, 0.85, 0.80, 0.75, 0.70, 0.65, 0.60, 0.55, 0.50, 0.45, 0.40, 0.35, 0.30]:
     pruned_model = VIBNet(z_dim, i_shape, h1, h2, o_shape).to(device)
     pruned_model.load_state_dict(weights)
     magnitude_prune_top_percent(pruned_model, pct)
