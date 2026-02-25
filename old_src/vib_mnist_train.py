@@ -13,6 +13,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 from msc import get_device, plot_information_plane, plot_losses, FashionMnistIdxDataset
 
+
 @dataclass
 class VIBNetParams:
     beta: float
@@ -31,16 +32,16 @@ class VIBNetParams:
     @classmethod
     def from_args(cls, args: argparse.Namespace):
         return cls(
-                beta=args.beta,
-                z_dim = args.z_dim,
-                hidden1 = args.hidden1,
-                hidden2 = args.hidden2,
-                lr = args.lr,
-                lr_decay = args.lr_decay,
-                batch_size = args.batch_size,
-                epochs = args.epochs,
-                device = get_device(),
-                rnd_seed = args.rnd_seed,
+            beta=args.beta,
+            z_dim=args.z_dim,
+            hidden1=args.hidden1,
+            hidden2=args.hidden2,
+            lr=args.lr,
+            lr_decay=args.lr_decay,
+            batch_size=args.batch_size,
+            epochs=args.epochs,
+            device=get_device(),
+            rnd_seed=args.rnd_seed,
         )
 
     def file_name(self) -> str:
@@ -53,45 +54,43 @@ class VIBNetParams:
 
     def to_json(self, test_losses: List[float], test_accuracy: float, ce_kls: List[Tuple[float, float]]) -> Dict:
         return {
-                "test_losses": test_losses,
-                "test_acc": test_accuracy,
-                "ce_kls": ce_kls,
-
-                "beta": self.beta,
-                "z_dim": self.z_dim,
-                "hidden1": self.hidden1,
-                "hidden2": self.hidden2,
-
-                "lr": self.lr,
-                "batch_size": self.batch_size,
-                "epochs": self.epochs,
-
-                "rnd_seed": self.rnd_seed,
+            "test_losses": test_losses,
+            "test_acc": test_accuracy,
+            "ce_kls": ce_kls,
+            "beta": self.beta,
+            "z_dim": self.z_dim,
+            "hidden1": self.hidden1,
+            "hidden2": self.hidden2,
+            "lr": self.lr,
+            "batch_size": self.batch_size,
+            "epochs": self.epochs,
+            "rnd_seed": self.rnd_seed,
         }
 
     def __str__(self):
         return (
-                f"hyperparameters:\n"
-                f"\tbeta          = {self.beta}\n"
-                f"\tz_dim         = {self.z_dim}\n"
-                f"\thidden1       = {self.hidden1}\n"
-                f"\thidden2       = {self.hidden2}\n"
-                f"\tlr            = {self.lr}\n"
-                f"\tepochs        = {self.epochs}\n"
-                f"\tbatch_size    = {self.batch_size}\n"
-                f"\tdevice        = {self.device}\n"
-                f"\trnd_seed      = {self.rnd_seed}\n"
-                f"\tsave_dir      = {self.save_dir()}"
+            f"hyperparameters:\n"
+            f"\tbeta          = {self.beta}\n"
+            f"\tz_dim         = {self.z_dim}\n"
+            f"\thidden1       = {self.hidden1}\n"
+            f"\thidden2       = {self.hidden2}\n"
+            f"\tlr            = {self.lr}\n"
+            f"\tepochs        = {self.epochs}\n"
+            f"\tbatch_size    = {self.batch_size}\n"
+            f"\tdevice        = {self.device}\n"
+            f"\trnd_seed      = {self.rnd_seed}\n"
+            f"\tsave_dir      = {self.save_dir()}"
         )
+
 
 class VIBNet(nn.Module):
     def __init__(
-            self,
-            z_dim: int,
-            input_shape: int,
-            hidden1: int,
-            hidden2: int,
-            output_shape: int,
+        self,
+        z_dim: int,
+        input_shape: int,
+        hidden1: int,
+        hidden2: int,
+        output_shape: int,
     ):
         super().__init__()
 
@@ -131,12 +130,9 @@ class VIBNet(nn.Module):
         logits = self.decode(z)
         return logits, mu, sigma
 
+
 def vib_loss(
-        logits: torch.Tensor,
-        y: torch.Tensor,
-        mu: torch.Tensor,
-        sigma: torch.Tensor,
-        beta: float
+    logits: torch.Tensor, y: torch.Tensor, mu: torch.Tensor, sigma: torch.Tensor, beta: float
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     kl: upper bound on I(Z;X) (compression)
@@ -146,20 +142,17 @@ def vib_loss(
     ce = F.cross_entropy(logits, y)
 
     variance = sigma.pow(2)
-    log_variance = 2*torch.log(sigma)
+    log_variance = 2 * torch.log(sigma)
 
     kl_terms = 0.5 * (variance + mu.pow(2) - 1.0 - log_variance)
     kl = torch.sum(kl_terms, dim=1).mean()
 
-    total_loss = ce + beta*kl
+    total_loss = ce + beta * kl
     return ce, kl, total_loss
 
+
 def train_epoch(
-        model: nn.Module,
-        dataloader: DataLoader,
-        optimizer: optim.Optimizer,
-        device: torch.device,
-        beta: float
+    model: nn.Module, dataloader: DataLoader, optimizer: optim.Optimizer, device: torch.device, beta: float
 ) -> Tuple[float, float]:
     model.train()
 
@@ -185,20 +178,15 @@ def train_epoch(
         correct += (preds == Y).sum().item()
         total += bs
 
-        tq.set_postfix({
-            "loss": f"{loss.item():.4f}",
-            "acc": f"{100.0 * correct / total:.2f}"
-        })
+        tq.set_postfix({"loss": f"{loss.item():.4f}", "acc": f"{100.0 * correct / total:.2f}"})
 
     avg_loss = running_loss / total
     accuracy = 100.0 * correct / total
     return avg_loss, accuracy
 
+
 def evaluate_epoch(
-        model: nn.Module,
-        dataloader: DataLoader,
-        device: torch.device,
-        beta: float
+    model: nn.Module, dataloader: DataLoader, device: torch.device, beta: float
 ) -> Tuple[float, float, float, float]:
     model.eval()
 
@@ -216,15 +204,16 @@ def evaluate_epoch(
 
     return loss.item(), ce.item(), kl.item(), acc
 
+
 def train_model(
-        model: nn.Module,
-        train_loader: DataLoader,
-        test_loader: DataLoader,
-        optimizer: optim.Optimizer,
-        scheduler: Optional[optim.lr_scheduler.LRScheduler],
-        device: torch.device,
-        epochs: int,
-        beta: float,
+    model: nn.Module,
+    train_loader: DataLoader,
+    test_loader: DataLoader,
+    optimizer: optim.Optimizer,
+    scheduler: Optional[optim.lr_scheduler.LRScheduler],
+    device: torch.device,
+    epochs: int,
+    beta: float,
 ) -> Tuple[List[float], List[float], List[float], List[float]]:
     model.to(device)
     train_losses, test_losses, test_ces, test_kls = [], [], [], []
@@ -235,7 +224,7 @@ def train_model(
             scheduler.step()
             print(f"lr: {optimizer.param_groups[0]['lr']:.10f}")
 
-        print(f"""epoch [{epoch+1}/{epochs}] β({beta}) train loss: {train_loss:.3f} | train acc: {train_acc:.2f}%
+        print(f"""epoch [{epoch + 1}/{epochs}] β({beta}) train loss: {train_loss:.3f} | train acc: {train_acc:.2f}%
                     test loss: {test_loss:.3f} | test acc: {test_acc:.2f}%""")
         train_losses.append(train_loss)
         test_losses.append(test_loss)
@@ -245,17 +234,18 @@ def train_model(
 
     return train_losses, test_losses, test_ces, test_kls
 
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="training script with configurable hyperparameters.")
     parser.add_argument("--beta", type=float, required=True, help="beta coefficient")
     parser.add_argument("--z_dim", type=int, default=125, help="latent dimension size")
     parser.add_argument("--hidden1", type=int, default=500, help="size of first hidden layer")
     parser.add_argument("--hidden2", type=int, default=300, help="size of second hidden layer")
-    parser.add_argument("--epochs", type=int, default=800, help="number of training epochs") # 200 in deep vib paper
+    parser.add_argument("--epochs", type=int, default=800, help="number of training epochs")  # 200 in deep vib paper
     parser.add_argument("--rnd_seed", type=bool, default=False, help="random torch seed or default of 42")
-    parser.add_argument("--lr", type=float, default=1e-4, help="learning rate") # 1e-4 in deep vib paper
+    parser.add_argument("--lr", type=float, default=1e-4, help="learning rate")  # 1e-4 in deep vib paper
     parser.add_argument("--lr_decay", type=bool, default=False, help="Enable learning rate decay")
-    parser.add_argument("--batch_size", type=int, default=100, help="batch size") # 100 in deep vib paper
+    parser.add_argument("--batch_size", type=int, default=100, help="batch size")  # 100 in deep vib paper
     args = parser.parse_args()
 
     if not args.rnd_seed:
@@ -279,12 +269,14 @@ def main() -> None:
         scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda epoch: 0.95 ** (epoch // 8))
 
     train_losses, test_losses, test_ces, test_kls = train_model(
-            model,
-            train_loader, test_loader,
-            optimizer, scheduler,
-            params.device,
-            params.epochs,
-            beta=params.beta,
+        model,
+        train_loader,
+        test_loader,
+        optimizer,
+        scheduler,
+        params.device,
+        params.epochs,
+        beta=params.beta,
     )
 
     test_loss, _, _, test_acc = evaluate_epoch(model, test_loader, params.device, params.beta)
@@ -296,6 +288,7 @@ def main() -> None:
 
     plot_losses(test_losses, train_losses, params.file_name(), params.save_dir())
     plot_information_plane(test_ces, test_kls, params.save_dir())
+
 
 if __name__ == "__main__":
     main()

@@ -5,7 +5,7 @@
 - you are an expert python developer who writes clean, concise code where every line counts
 
 ## Coding Style
-- use 2-space indentation
+- use 4-space indentation
 - use snake_case for variables, functions, methods, and filenames where applicable
 - avoid unnecessary abstractions and keep implementations direct
 - prefer readable, minimal code over verbose patterns

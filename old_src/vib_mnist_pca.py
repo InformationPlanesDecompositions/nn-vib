@@ -15,6 +15,7 @@ from vib_mnist_train import VIBNet
 
 DEVICE = get_device()
 
+
 def extract_features(model, data_loader, target_layer_name):
     model.eval()
     activations = {}
@@ -22,6 +23,7 @@ def extract_features(model, data_loader, target_layer_name):
     def get_activations(name):
         def hook(model, input, output):
             activations[name] = output.detach().cpu()
+
         return hook
 
     target_layer = dict(model.named_modules())[target_layer_name]
@@ -45,6 +47,7 @@ def extract_features(model, data_loader, target_layer_name):
 
     return features_np, labels_np
 
+
 def perform_pca_and_plot(ax, features, labels, title):
     scaler = StandardScaler()
     features_scaled = scaler.fit_transform(features)
@@ -65,7 +68,7 @@ def perform_pca_and_plot(ax, features, labels, title):
             pca_df.loc[indices_to_keep, "PC2"],
             label=f"Class {int(label)}",
             alpha=0.6,
-            s=10
+            s=10,
         )
 
     ax.set_title(title, fontsize=10)
@@ -88,7 +91,7 @@ test_loader = DataLoader(test_dataset, 100, shuffle=True)
 
 layer_to_inspect = "fc_mu"
 
-num_plots = len(betas)+1
+num_plots = len(betas) + 1
 cols = 3
 rows = (num_plots + cols - 1) // cols
 fig, axes = plt.subplots(rows, cols, figsize=(5 * cols, 5 * rows))
@@ -102,7 +105,9 @@ for i, (beta, lr) in tqdm(enumerate(betas)):
     features, labels = extract_features(model, test_loader, layer_to_inspect)
     perform_pca_and_plot(axes[i], features, labels, f"β: {beta}, lr: {lr}")
 
-weights = load_weights("save_stats_weights/vib_mnist_300_100_75_0.01_0.0001_500/vib_mnist_300_100_75_0.01_0.0001.pth", verbose=False)
+weights = load_weights(
+    "save_stats_weights/vib_mnist_300_100_75_0.01_0.0001_500/vib_mnist_300_100_75_0.01_0.0001.pth", verbose=False
+)
 model = VIBNet(z_dim, 784, h1, h2, o_shape).to(DEVICE)
 model.load_state_dict(weights)
 features, labels = extract_features(model, test_loader, layer_to_inspect)

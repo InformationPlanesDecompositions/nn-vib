@@ -2,6 +2,7 @@ from typing import List, Dict
 import torch
 import torch.nn as nn
 
+
 def svd(model: nn.Module, layers: List[str]) -> Dict[str, Dict[str, torch.Tensor]]:
     results = {}
 
@@ -23,9 +24,9 @@ def svd(model: nn.Module, layers: List[str]) -> Dict[str, Dict[str, torch.Tensor
             U, S, Vh = torch.linalg.svd(weights, full_matrices=False)
 
             results[layer_name] = {
-                "U": U, # output basis
-                "S": S, # singular values
-                "Vh": Vh, # input basis
+                "U": U,  # output basis
+                "S": S,  # singular values
+                "Vh": Vh,  # input basis
             }
         else:
             print(f"warning: layer '{layer_name}' does not have a 'weight' attribute!")
