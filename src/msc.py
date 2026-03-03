@@ -83,7 +83,7 @@ class VIBNetParams:
     batch_size: int
     epochs: int
     device: torch.device
-    rnd_seed: bool
+    rnd_seed: int
 
     @classmethod
     def from_args(cls, args: argparse.Namespace, model_name: str):
@@ -452,10 +452,10 @@ def run_training_job(
     train_dataset: Dataset,
     test_dataset: Dataset,
 ) -> None:
-    if not params.rnd_seed:
-        torch.manual_seed(42)
-        if torch.cuda.is_available():
-            torch.cuda.manual_seed(42)
+    seed = params.rnd_seed if isinstance(params.rnd_seed, int) and not isinstance(params.rnd_seed, bool) else 42
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
     print(params)
     train_loader = DataLoader(train_dataset, params.batch_size, shuffle=True)
     test_loader = DataLoader(test_dataset, params.batch_size, shuffle=False)

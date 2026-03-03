@@ -54,7 +54,7 @@ if __name__ == "__main__":
     parser.add_argument("--hidden1", type=int, required=True, default=1024, help="size of first hidden layer")
     parser.add_argument("--hidden2", type=int, required=True, default=512, help="size of second hidden layer")
     parser.add_argument("--epochs", type=int, required=True, default=200, help="number of training epochs")
-    parser.add_argument("--rnd_seed", type=bool, default=False, help="random torch seed or default of 42")
+    parser.add_argument("--rnd_seed", type=int, default=42, help="torch manual seed (default: 42)")
     parser.add_argument("--lr", type=float, default=2e-4, help="learning rate")
     parser.add_argument("--batch_size", type=int, default=128, help="batch size")
     parser.add_argument("--data_dir", type=str, default="data/CIFAR-10/", help="dataset path")

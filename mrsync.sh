@@ -1,5 +1,6 @@
 #!/bin/sh
 
+#./ conqueror-home:dev/nn-vib
 rsync -av \
     --exclude='.git/' \
     --exclude='.venv/' \
@@ -10,4 +11,4 @@ rsync -av \
     --exclude='save_stats_weights' \
     --exclude='plots/' \
     --exclude='saved_plots/' \
-    ./ conqueror-home:dev/nn-vib
+    ./ ln@conqueror.lneural.net:dev/nn-vib
