@@ -101,7 +101,7 @@ class VIBNetParams:
         )
 
     def file_name(self) -> str:
-        return f"vib_{self.model_name}_{self.hidden1}_{self.hidden2}_{self.z_dim}_{self.beta}_{self.lr}_{self.epochs}"
+        return f"vib_{self.model_name}_{self.hidden1}_{self.hidden2}_{self.z_dim}_{self.beta}_{self.lr}_{self.epochs}_{self.rnd_seed}"
 
     def save_dir(self) -> str:
         s = f"save_stats_weights/{self.file_name()}"

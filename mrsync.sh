@@ -1,6 +1,14 @@
 #!/bin/sh
 
-#./ conqueror-home:dev/nn-vib
+dest="conqueror-home:dev/nn-vib"
+
+if [ "$1" = "--away" ]; then
+    dest="ln@conqueror.lneural.net:dev/nn-vib"
+elif [ -n "$1" ]; then
+    echo "usage: $0 [--away]"
+    exit 1
+fi
+
 rsync -av \
     --exclude='.git/' \
     --exclude='.venv/' \
@@ -11,4 +19,4 @@ rsync -av \
     --exclude='save_stats_weights' \
     --exclude='plots/' \
     --exclude='saved_plots/' \
-    ./ ln@conqueror.lneural.net:dev/nn-vib
+    ./ "$dest"
