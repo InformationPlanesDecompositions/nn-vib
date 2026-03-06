@@ -338,10 +338,12 @@ def vib_loss(
     beta: float,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     ce = F.cross_entropy(logits, y)
+    # KL(q(z|x) || p(z)) for diagonal Gaussians with p(z)=N(0, I).
     variance = sigma.pow(2)
     log_variance = 2 * torch.log(sigma)
     kl_terms = 0.5 * (variance + mu.pow(2) - 1.0 - log_variance)
     kl = torch.sum(kl_terms, dim=1).mean()
+    # classification fit + compressed latent regularization.
     total_loss = ce + beta * kl
     return ce, kl, total_loss
 
@@ -369,12 +371,7 @@ def train_epoch(
         _, preds = torch.max(logits, 1)
         correct += (preds == Y).sum().item()
         total += bs
-        tq.set_postfix(
-            {
-                "loss": f"{loss.item():.4f}",
-                "acc": f"{100.0 * correct / total:.2f}",
-            }
-        )
+        tq.set_postfix({ "loss": f"{loss.item():.4f}", "acc": f"{100.0 * correct / total:.2f}" })
     avg_loss = running_loss / total
     accuracy = 100.0 * correct / total
     return avg_loss, accuracy
@@ -389,16 +386,19 @@ def evaluate_epoch(
 ) -> Tuple[float, float, float, float]:
     model.eval()
     with torch.no_grad():
+        # build one large tensor to run MC prediction over the full eval set.
         batches = list(dataloader)
         Xs, Ys = zip(*batches)
         X = torch.cat(Xs, dim=0).to(device)
         Y = torch.cat(Ys, dim=0).to(device)
         logits, mu, sigma = model(X)
         probs_sum = F.softmax(logits, dim=1)
+        # monte carlo average over latent samples z for p(y|x).
         for _ in range(mc_samples - 1):
             logits, _, _ = model(X)
             probs_sum += F.softmax(logits, dim=1)
         probs = probs_sum / mc_samples
+        # ce is computed from averaged predictive probabilities.
         ce = F.nll_loss(torch.log(probs.clamp_min(1e-8)), Y)
         variance = sigma.pow(2)
         log_variance = 2 * torch.log(sigma)
