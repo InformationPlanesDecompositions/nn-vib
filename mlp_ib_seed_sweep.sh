@@ -1,8 +1,32 @@
 #!/bin/sh
 
+betas_override=""
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --betas)
+            shift
+            if [ -z "$1" ]; then
+                echo "error: --betas requires a value"
+                exit 1
+            fi
+            betas_override="$1"
+            shift
+            ;;
+        -h|--help)
+            echo "usage: $0 [--betas <list>] <max_parallel_jobs> <seed1> [seed2 ...]"
+            echo "  --betas accepts comma or space separated values"
+            echo "example: $0 --betas 0.5,0.4,0.3 3 7 11 42"
+            exit 0
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+
 if [ "$#" -lt 2 ]; then
-    echo "usage: $0 <max_parallel_jobs> <seed1> [seed2 ...]"
-    echo "example: $0 3 7 11 42"
+    echo "usage: $0 [--betas <list>] <max_parallel_jobs> <seed1> [seed2 ...]"
+    echo "example: $0 --betas 0.5,0.4,0.3 3 7 11 42"
     exit 1
 fi
 
@@ -18,6 +42,13 @@ esac
 
 epochs="400"
 lr="2e-4"
+betas_small="0.5 0.4 0.3 0.2 0.1 0.01 0.001 0.0001"
+betas_large="0.7 0.6 0.5 0.4 0.3 0.2 0.1 0.01"
+if [ -n "$betas_override" ]; then
+    betas_override=$(printf "%s" "$betas_override" | tr ',' ' ')
+    betas_small="$betas_override"
+    betas_large="$betas_override"
+fi
 active_jobs=0
 fail_marker=".mlp_ib_seed_sweep_failed.$$"
 rm -f "$fail_marker"
@@ -71,7 +102,7 @@ echo "--- starting mlp_ib seed sweep (epochs=${epochs}, lr=${lr}, max_jobs=${max
 
 for seed in "$@"; do
     echo "--- running seed ${seed} ---"
-    for beta in 0.5 0.4 0.3 0.2 0.1 0.01 0.001 0.0001; do
+    for beta in $betas_small; do
         run_training_job "$seed" 386 15 128 "$beta" &
         active_jobs=$((active_jobs + 1))
         if [ "$active_jobs" -ge "$max_jobs" ]; then
@@ -79,7 +110,7 @@ for seed in "$@"; do
             active_jobs=0
         fi
     done
-    for beta in 0.5 0.4 0.3 0.2 0.1 0.01 0.001 0.0001; do
+    for beta in $betas_small; do
         run_training_job "$seed" 256 10 64 "$beta" &
         active_jobs=$((active_jobs + 1))
         if [ "$active_jobs" -ge "$max_jobs" ]; then
@@ -87,7 +118,7 @@ for seed in "$@"; do
             active_jobs=0
         fi
     done
-    for beta in 0.7 0.6 0.5 0.4 0.3 0.2 0.1 0.01; do
+    for beta in $betas_large; do
         run_training_job "$seed" 512 10 128 "$beta" &
         active_jobs=$((active_jobs + 1))
         if [ "$active_jobs" -ge "$max_jobs" ]; then
