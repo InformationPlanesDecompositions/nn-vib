@@ -25,6 +25,8 @@ batch_size = 128
 
 # pruning experiment config
 layers_to_prune = ["fc_mu", "fc_logvar", "fc2"]
+layers_to_prune_fc2_only = ["fc2"]
+prune_layer_sets = [layers_to_prune, layers_to_prune_fc2_only]
 layers_to_inspect = ["fc_mu", "fc_logvar"]
 top_k_neurons = 10
 prune_percents = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70]
@@ -210,9 +212,9 @@ def run_pruning_stability(
   for run in runs:
     print(f"\nrun: {run.run_name}")
     state_dict = load_state_dict_from_run(run.run_dir)
-    inspect_model = VIBNet(z_dim, input_shape, hidden1, hidden2, output_shape).to(device)
-    inspect_model.load_state_dict(state_dict)
-    inspect_top_neurons(inspect_model, layers_to_inspect, top_k_neurons)
+    # inspect_model = VIBNet(z_dim, input_shape, hidden1, hidden2, output_shape).to(device)
+    # inspect_model.load_state_dict(state_dict)
+    # inspect_top_neurons(inspect_model, layers_to_inspect, top_k_neurons)
     xs = []
     ys = []
     for pct in prune_percent_values:
@@ -281,18 +283,21 @@ if __name__ == "__main__":
     raise RuntimeError(
       f"no runs found for h1={hidden1}, h2={hidden2}, z={z_dim}, seed={seed}, lr={target_lr}, epochs={target_epochs}"
     )
-  print("selected runs:")
-  for run in runs:
-    print(f"- beta={run.beta:g} lr={run.lr:g} epochs={run.epochs} dir={run.run_name}")
-  curves = run_pruning_stability(
-    runs=runs,
-    hidden1=hidden1,
-    hidden2=hidden2,
-    z_dim=z_dim,
-    layer_names=layers_to_prune,
-    prune_fn=neuron_prune_layers,
-    prune_percent_values=prune_percents,
-  )
-  save_path = plot_curves(curves, hidden1, hidden2, z_dim, seed, layers_to_prune)
-  print(f"\nplot saved to: {save_path}")
-  input("press enter to terminate...")
+  # print("selected runs:")
+  # for run in runs:
+  #   print(f"- beta={run.beta:g} lr={run.lr:g} epochs={run.epochs} dir={run.run_name}")
+
+  for current_layers_to_prune in prune_layer_sets:
+    curves = run_pruning_stability(
+      runs=runs,
+      hidden1=hidden1,
+      hidden2=hidden2,
+      z_dim=z_dim,
+      layer_names=current_layers_to_prune,
+      prune_fn=neuron_prune_layers,
+      prune_percent_values=prune_percents,
+    )
+    save_path = plot_curves(curves, hidden1, hidden2, z_dim, seed, current_layers_to_prune)
+    print(f"\nplot saved to: {save_path}")
+
+  # input("press enter to terminate...")
