@@ -1,6 +1,3 @@
-
-
-
 # lenet
 # cnn lenet ?
 # .
