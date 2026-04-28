@@ -27,12 +27,10 @@ batch_size = 128
 layers_to_prune = ["fc_mu", "fc_logvar", "fc2"]
 layers_to_prune_fc2_only = ["fc2"]
 prune_layer_sets = [layers_to_prune, layers_to_prune_fc2_only]
-layers_to_inspect = ["fc_mu", "fc_logvar"]
-top_k_neurons = 10
-prune_percents = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70]
+prune_percents = [0.0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7]
 
 # paths
-save_root = "save_stats_weights"
+default_save_root = "save_stats_weights"
 plots_dir = "plots"
 os.makedirs(plots_dir, exist_ok=True)
 
@@ -50,8 +48,9 @@ class RunSpec:
 def indices_above_avg_abs_threshold(
   model: nn.Module,
   layer_name: str,
-  top_k: int,
+  count: int,
   axis: str = "row",
+  largest: bool = True,
 ) -> dict[int, float]:
   layer = dict(model.named_modules())[layer_name]
   if not isinstance(layer, nn.Linear):
@@ -68,72 +67,60 @@ def indices_above_avg_abs_threshold(
       avg_abs_by_idx.append((col_idx, avg_abs_weight))
   else:
     raise ValueError("axis must be 'row' or 'col'")
-  avg_abs_by_idx.sort(key=lambda x: x[1], reverse=True)
-  top_pairs = avg_abs_by_idx[:top_k]
-  return {idx: avg for idx, avg in top_pairs}
+  avg_abs_by_idx.sort(key=lambda x: x[1], reverse=largest)
+  selected_pairs = avg_abs_by_idx[:count]
+  return {idx: avg for idx, avg in selected_pairs}
 
 
 def inspect_top_neurons(
   model: nn.Module,
   layer_names: list[str],
-  top_k: int,
+  count: int | dict[str, int],
+  axis: str = "row",
+  largest: bool = True,
+  verbose: bool = True,
 ) -> dict[str, list[int]]:
   top_neurons = {}
   for layer_name in layer_names:
-    indices = indices_above_avg_abs_threshold(model, layer_name, top_k, axis="row")
+    layer_count = count[layer_name] if isinstance(count, dict) else count
+    indices = indices_above_avg_abs_threshold(model, layer_name, layer_count, axis=axis, largest=largest)
     top_neurons[layer_name] = list(indices.keys())
-    print(f"  inspect {layer_name}: {top_neurons[layer_name]}")
+    if verbose:
+      print(f"  inspect {layer_name}: {top_neurons[layer_name]}")
   return top_neurons
 
 
-def mask_keep_neurons(
-  weight_matrix: torch.Tensor,
-  keep_row_indices: list[int] | None = None,
-  keep_col_indices: list[int] | None = None,
-) -> tuple[torch.Tensor, torch.Tensor]:
-  mask = torch.zeros_like(weight_matrix)
-  if keep_row_indices is None and keep_col_indices is None:
-    return weight_matrix * mask, mask
-  if keep_row_indices is None:
-    keep_row_indices = list(range(weight_matrix.shape[0]))
-  if keep_col_indices is None:
-    keep_col_indices = list(range(weight_matrix.shape[1]))
-  row_idx = torch.tensor(keep_row_indices, device=weight_matrix.device)
-  col_idx = torch.tensor(keep_col_indices, device=weight_matrix.device)
-  mask[row_idx.unsqueeze(1), col_idx.unsqueeze(0)] = 1
-  return weight_matrix * mask, mask
-
-
-def neuron_prune_layers(model: nn.Module, layer_names: list[str], amount: float) -> None:
+def neuron_prune_layers(model: nn.Module, layer_names: list[str], amount: float, axis: str = "row") -> None:
   if amount <= 0:
     return
+  if axis not in {"row", "col"}:
+    raise ValueError("axis must be 'row' or 'col'")
   modules = dict(model.named_modules())
+  prune_counts = {}
   for layer_name in layer_names:
     module = modules.get(layer_name)
     if module is None:
       raise ValueError(f"layer not found in model: {layer_name}")
     if not isinstance(module, nn.Linear):
       raise ValueError(f"layer is not nn.Linear: {layer_name}")
-    row_count = module.weight.shape[0]
-    keep_count = int(round((1.0 - amount) * row_count))
-    keep_count = max(0, min(row_count, keep_count))
-    if keep_count == row_count:
+    axis_count = module.weight.shape[0] if axis == "row" else module.weight.shape[1]
+    prune_count = int(round(amount * axis_count))
+    prune_counts[layer_name] = max(0, min(axis_count, prune_count))
+
+  indices_to_prune = inspect_top_neurons(model, layer_names, prune_counts, axis=axis, largest=False, verbose=False)
+
+  for layer_name, prune_indices in indices_to_prune.items():
+    if not prune_indices:
       continue
-    avg_abs_by_row = []
-    for row_idx in range(row_count):
-      avg_abs_weight = module.weight[row_idx, :].detach().abs().mean().item()
-      avg_abs_by_row.append((row_idx, avg_abs_weight))
-    avg_abs_by_row.sort(key=lambda x: x[1], reverse=True)
-    keep_rows = [idx for idx, _ in avg_abs_by_row[:keep_count]]
+    module = modules[layer_name]
     with torch.no_grad():
-      pruned_weights, _ = mask_keep_neurons(module.weight, keep_row_indices=keep_rows)
-      module.weight.copy_(pruned_weights)
-      if module.bias is not None:
-        bias_mask = torch.zeros_like(module.bias)
-        if keep_rows:
-          keep_idx = torch.tensor(keep_rows, device=module.bias.device)
-          bias_mask[keep_idx] = 1
-        module.bias.mul_(bias_mask)
+      prune_idx = torch.tensor(prune_indices, device=module.weight.device)
+      if axis == "row":
+        module.weight[prune_idx, :] = 0
+        if module.bias is not None:
+          module.bias[prune_idx] = 0
+      else:
+        module.weight[:, prune_idx] = 0
 
 
 def parse_run_specs(
@@ -202,8 +189,9 @@ def run_pruning_stability(
   z_dim: int,
   layer_names: list[str],
   prune_fn,
-  prune_percent_values: list[int],
-) -> dict[float, tuple[list[int], list[float]]]:
+  prune_percent_values: list[float],
+  prune_axis: str,
+) -> dict[float, tuple[list[float], list[float]]]:
   device = get_device()
   test_loader = DataLoader(
     FashionMnistIdxDataset("data/mnist_fashion/", train=False), batch_size=batch_size, shuffle=False
@@ -212,43 +200,41 @@ def run_pruning_stability(
   for run in runs:
     print(f"\nrun: {run.run_name}")
     state_dict = load_state_dict_from_run(run.run_dir)
-    # inspect_model = VIBNet(z_dim, input_shape, hidden1, hidden2, output_shape).to(device)
-    # inspect_model.load_state_dict(state_dict)
-    # inspect_top_neurons(inspect_model, layers_to_inspect, top_k_neurons)
     xs = []
     ys = []
     for pct in prune_percent_values:
-      amount = pct / 100.0
       model = VIBNet(z_dim, input_shape, hidden1, hidden2, output_shape).to(device)
       model.load_state_dict(state_dict)
-      prune_fn(model, layer_names, amount)
+      prune_fn(model, layer_names, pct, axis=prune_axis)
       loss, _, _, acc = evaluate_epoch(model, test_loader, device, beta=run.beta)
       xs.append(pct)
       ys.append(loss)
-      print(f"  prune={pct:>3}% loss={loss:.6f} acc={acc:.2f}")
+      print(f"  prune={pct * 100:>5.1f}% loss={loss:.6f} acc={acc:.2f}")
     curves[run.beta] = (xs, ys)
   return curves
 
 
 def plot_curves(
-  curves: dict[float, tuple[list[int], list[float]]],
+  curves: dict[float, tuple[list[float], list[float]]],
   hidden1: int,
   hidden2: int,
   z_dim: int,
   seed: int,
   layer_names: list[str],
+  prune_axis: str,
 ) -> str:
   plt.figure(figsize=(10, 6))
   for beta, (xs, ys) in sorted(curves.items(), key=lambda item: item[0]):
-    plt.plot(xs, ys, marker="o", linewidth=2, label=f"beta={beta:g}")
+    xs_pct = [x * 100 for x in xs]
+    plt.plot(xs_pct, ys, marker="o", linewidth=2, label=f"beta={beta:g}")
   layer_part = ", ".join(layer_names)
-  plt.title(f"mlp ({hidden1}, {hidden2}, {z_dim}) seed={seed} | pruned: {layer_part}")
+  plt.title(f"mlp ({hidden1}, {hidden2}, {z_dim}) seed={seed} | axis={prune_axis} | pruned: {layer_part}")
   plt.xlabel("percent of neurons pruned")
   plt.ylabel("test loss")
   plt.grid(True, alpha=0.3)
   plt.legend()
   layer_key = "_".join(layer_names)
-  save_name = f"mlp_prune_h1_{hidden1}_h2_{hidden2}_z_{z_dim}_seed_{seed}_{layer_key}.png"
+  save_name = f"mlp_prune_{prune_axis}_h1_{hidden1}_h2_{hidden2}_z_{z_dim}_seed_{seed}_{layer_key}.png"
   save_path = os.path.join(plots_dir, save_name)
   plt.savefig(save_path, dpi=300, bbox_inches="tight")
   plt.close()
@@ -257,10 +243,12 @@ def plot_curves(
 
 def parse_args() -> argparse.Namespace:
   parser = argparse.ArgumentParser(description="inspect mlp pruning stability across betas")
+  parser.add_argument("--save_root", type=str, required=True, help="directory containing saved model runs")
   parser.add_argument("--hidden1", type=int, required=True, help="first hidden layer width")
   parser.add_argument("--hidden2", type=int, required=True, help="second hidden layer width")
   parser.add_argument("--z_dim", type=int, required=True, help="latent bottleneck size")
   parser.add_argument("--seed", type=int, required=True, help="random seed")
+  parser.add_argument("--prune_axis", choices=["row", "col"], default="row", help="prune ranked weight rows (out) or columns (in)")
   return parser.parse_args()
 
 
@@ -270,6 +258,8 @@ if __name__ == "__main__":
   hidden2 = args.hidden2
   z_dim = args.z_dim
   seed = args.seed
+  save_root = args.save_root
+  prune_axis = args.prune_axis
   runs = parse_run_specs(
     root_dir=save_root,
     target_hidden1=hidden1,
@@ -283,9 +273,10 @@ if __name__ == "__main__":
     raise RuntimeError(
       f"no runs found for h1={hidden1}, h2={hidden2}, z={z_dim}, seed={seed}, lr={target_lr}, epochs={target_epochs}"
     )
-  # print("selected runs:")
-  # for run in runs:
-  #   print(f"- beta={run.beta:g} lr={run.lr:g} epochs={run.epochs} dir={run.run_name}")
+
+  #print("selected runs:")
+  #for run in runs:
+  #  print(f"- beta={run.beta:g} lr={run.lr:g} epochs={run.epochs} dir={run.run_name}")
 
   for current_layers_to_prune in prune_layer_sets:
     curves = run_pruning_stability(
@@ -296,8 +287,9 @@ if __name__ == "__main__":
       layer_names=current_layers_to_prune,
       prune_fn=neuron_prune_layers,
       prune_percent_values=prune_percents,
+      prune_axis=prune_axis,
     )
-    save_path = plot_curves(curves, hidden1, hidden2, z_dim, seed, current_layers_to_prune)
+    save_path = plot_curves(curves, hidden1, hidden2, z_dim, seed, current_layers_to_prune, prune_axis)
     print(f"\nplot saved to: {save_path}")
 
   # input("press enter to terminate...")
