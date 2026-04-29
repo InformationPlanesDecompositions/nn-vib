@@ -1,24 +1,19 @@
 #!/usr/bin/env python3
 import argparse
+import json
 import os
 import re
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
-import matplotlib
-
-if "MPLBACKEND" not in os.environ:
-  matplotlib.use("Agg")
-
-import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
+
 from mlp_ib import VIBNet
 from msc import FashionMnistIdxDataset, evaluate_epoch, get_device
 
-# run selection
-target_lr = 0.0002
-target_epochs = 400
+# model and evaluation config
 input_shape = 784
 output_shape = 10
 batch_size = 128
@@ -29,16 +24,14 @@ layers_to_prune_fc2_only = ["fc2"]
 prune_layer_sets = [layers_to_prune, layers_to_prune_fc2_only]
 prune_percents = [0.0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7]
 
-# paths
-default_save_root = "save_stats_weights"
-plots_dir = "plots"
-os.makedirs(plots_dir, exist_ok=True)
 
-
-@dataclass
+@dataclass(frozen=True)
 class RunSpec:
   run_dir: str
   run_name: str
+  hidden1: int
+  hidden2: int
+  z_dim: int
   beta: float
   lr: float
   epochs: int
@@ -78,15 +71,12 @@ def inspect_top_neurons(
   count: int | dict[str, int],
   axis: str = "row",
   largest: bool = True,
-  verbose: bool = True,
 ) -> dict[str, list[int]]:
   top_neurons = {}
   for layer_name in layer_names:
     layer_count = count[layer_name] if isinstance(count, dict) else count
     indices = indices_above_avg_abs_threshold(model, layer_name, layer_count, axis=axis, largest=largest)
     top_neurons[layer_name] = list(indices.keys())
-    if verbose:
-      print(f"  inspect {layer_name}: {top_neurons[layer_name]}")
   return top_neurons
 
 
@@ -107,7 +97,7 @@ def neuron_prune_layers(model: nn.Module, layer_names: list[str], amount: float,
     prune_count = int(round(amount * axis_count))
     prune_counts[layer_name] = max(0, min(axis_count, prune_count))
 
-  indices_to_prune = inspect_top_neurons(model, layer_names, prune_counts, axis=axis, largest=False, verbose=False)
+  indices_to_prune = inspect_top_neurons(model, layer_names, prune_counts, axis=axis, largest=False)
 
   for layer_name, prune_indices in indices_to_prune.items():
     if not prune_indices:
@@ -123,17 +113,9 @@ def neuron_prune_layers(model: nn.Module, layer_names: list[str], amount: float,
         module.weight[:, prune_idx] = 0
 
 
-def parse_run_specs(
-  root_dir: str,
-  target_hidden1: int,
-  target_hidden2: int,
-  target_z_dim: int,
-  target_seed: int,
-  lr_filter: float | None,
-  epochs_filter: int | None,
-) -> list[RunSpec]:
+def parse_all_run_specs(root_dir: str) -> list[RunSpec]:
   pattern = re.compile(r"^vib_mlp_(\d+)_(\d+)_(\d+)_([0-9.eE+-]+)_([0-9.eE+-]+)_(\d+)_(\d+)$")
-  candidates = []
+  runs = []
   for run_name in os.listdir(root_dir):
     run_dir = os.path.join(root_dir, run_name)
     if not os.path.isdir(run_dir):
@@ -142,37 +124,20 @@ def parse_run_specs(
     if not match:
       continue
     h1_s, h2_s, z_s, beta_s, lr_s, epochs_s, seed_s = match.groups()
-    if int(h1_s) != target_hidden1 or int(h2_s) != target_hidden2 or int(z_s) != target_z_dim:
-      continue
-    if int(seed_s) != target_seed:
-      continue
-    lr_value = float(lr_s)
-    epochs_value = int(epochs_s)
-    if lr_filter is not None and lr_value != lr_filter:
-      continue
-    if epochs_filter is not None and epochs_value != epochs_filter:
-      continue
-    candidates.append(
+    runs.append(
       RunSpec(
         run_dir=run_dir,
         run_name=run_name,
+        hidden1=int(h1_s),
+        hidden2=int(h2_s),
+        z_dim=int(z_s),
         beta=float(beta_s),
-        lr=lr_value,
-        epochs=epochs_value,
+        lr=float(lr_s),
+        epochs=int(epochs_s),
         seed=int(seed_s),
       )
     )
-  if not candidates:
-    return []
-  selected_by_beta = {}
-  for run in candidates:
-    prev = selected_by_beta.get(run.beta)
-    if prev is None:
-      selected_by_beta[run.beta] = run
-      continue
-    if run.epochs > prev.epochs:
-      selected_by_beta[run.beta] = run
-  return sorted(selected_by_beta.values(), key=lambda r: r.beta)
+  return sorted(runs, key=lambda run: (run.hidden1, run.hidden2, run.z_dim, run.seed, run.lr, run.epochs, run.beta))
 
 
 def load_state_dict_from_run(run_dir: str) -> dict[str, torch.Tensor]:
@@ -182,114 +147,119 @@ def load_state_dict_from_run(run_dir: str) -> dict[str, torch.Tensor]:
   return torch.load(os.path.join(run_dir, pth_files[0]), map_location="cpu")
 
 
-def run_pruning_stability(
-  runs: list[RunSpec],
-  hidden1: int,
-  hidden2: int,
-  z_dim: int,
+def config_key(run: RunSpec) -> tuple[int, int, int, int, float, int]:
+  return (run.hidden1, run.hidden2, run.z_dim, run.seed, run.lr, run.epochs)
+
+
+def group_runs_by_config(runs: list[RunSpec]) -> list[tuple[tuple[int, int, int, int, float, int], list[RunSpec]]]:
+  grouped = {}
+  for run in runs:
+    key = config_key(run)
+    grouped.setdefault(key, []).append(run)
+  items = []
+  for key, config_runs in grouped.items():
+    items.append((key, sorted(config_runs, key=lambda run: run.beta)))
+  items.sort(key=lambda item: item[0])
+  return items
+
+
+def evaluate_pruning_curve(
+  run: RunSpec,
   layer_names: list[str],
-  prune_fn,
-  prune_percent_values: list[float],
   prune_axis: str,
-) -> dict[float, tuple[list[float], list[float]]]:
+  test_loader: DataLoader,
+  device: torch.device,
+) -> dict[str, object]:
+  print(f"  beta={run.beta:g} run={run.run_name}")
+  state_dict = load_state_dict_from_run(run.run_dir)
+  losses = []
+  accuracies = []
+  for prune_percent in prune_percents:
+    model = VIBNet(run.z_dim, input_shape, run.hidden1, run.hidden2, output_shape).to(device)
+    model.load_state_dict(state_dict)
+    neuron_prune_layers(model, layer_names, prune_percent, axis=prune_axis)
+    loss, _, _, acc = evaluate_epoch(model, test_loader, device, beta=run.beta)
+    losses.append(float(loss))
+    accuracies.append(float(acc))
+    print(f"    prune={prune_percent * 100:>5.1f}% loss={loss:.6f} acc={acc:.2f}")
+  return {
+    "beta": run.beta,
+    "run_name": run.run_name,
+    "run_dir": run.run_dir,
+    "prune_percents": prune_percents,
+    "losses": losses,
+    "accuracies": accuracies,
+  }
+
+
+def build_report(save_root: str, prune_axis: str) -> dict[str, object]:
+  runs = parse_all_run_specs(save_root)
+  if not runs:
+    raise RuntimeError(f"no vib_mlp_* runs found in {save_root}")
+
   device = get_device()
   test_loader = DataLoader(
-    FashionMnistIdxDataset("data/mnist_fashion/", train=False), batch_size=batch_size, shuffle=False
+    FashionMnistIdxDataset("data/mnist_fashion/", train=False),
+    batch_size=batch_size,
+    shuffle=False,
   )
-  curves = {}
-  for run in runs:
-    print(f"\nrun: {run.run_name}")
-    state_dict = load_state_dict_from_run(run.run_dir)
-    xs = []
-    ys = []
-    for pct in prune_percent_values:
-      model = VIBNet(z_dim, input_shape, hidden1, hidden2, output_shape).to(device)
-      model.load_state_dict(state_dict)
-      prune_fn(model, layer_names, pct, axis=prune_axis)
-      loss, _, _, acc = evaluate_epoch(model, test_loader, device, beta=run.beta)
-      xs.append(pct)
-      ys.append(loss)
-      print(f"  prune={pct * 100:>5.1f}% loss={loss:.6f} acc={acc:.2f}")
-    curves[run.beta] = (xs, ys)
-  return curves
+
+  configs = []
+  grouped_runs = group_runs_by_config(runs)
+  for config_idx, (_, config_runs) in enumerate(grouped_runs, start=1):
+    first_run = config_runs[0]
+    print(
+      f"[{config_idx}/{len(grouped_runs)}] h1={first_run.hidden1} h2={first_run.hidden2} "
+      f"z={first_run.z_dim} seed={first_run.seed} lr={first_run.lr:g} epochs={first_run.epochs}"
+    )
+    layer_results = []
+    for layer_names in prune_layer_sets:
+      print(f"  layers={', '.join(layer_names)}")
+      curves = []
+      for run in config_runs:
+        curves.append(evaluate_pruning_curve(run, layer_names, prune_axis, test_loader, device))
+      layer_results.append({"layer_names": layer_names, "curves": curves})
+    configs.append(
+      {
+        "hidden1": first_run.hidden1,
+        "hidden2": first_run.hidden2,
+        "z_dim": first_run.z_dim,
+        "seed": first_run.seed,
+        "lr": first_run.lr,
+        "epochs": first_run.epochs,
+        "layer_results": layer_results,
+      }
+    )
+
+  return {
+    "save_root": os.path.abspath(save_root),
+    "prune_axis": prune_axis,
+    "prune_percents": prune_percents,
+    "layer_sets": prune_layer_sets,
+    "generated_at": datetime.now(timezone.utc).isoformat(),
+    "config_count": len(configs),
+    "run_count": len(runs),
+    "configs": configs,
+  }
 
 
-def plot_curves(
-  curves: dict[float, tuple[list[float], list[float]]],
-  hidden1: int,
-  hidden2: int,
-  z_dim: int,
-  seed: int,
-  layer_names: list[str],
-  prune_axis: str,
-) -> str:
-  plt.figure(figsize=(10, 6))
-  for beta, (xs, ys) in sorted(curves.items(), key=lambda item: item[0]):
-    xs_pct = [x * 100 for x in xs]
-    plt.plot(xs_pct, ys, marker="o", linewidth=2, label=f"beta={beta:g}")
-  layer_part = ", ".join(layer_names)
-  plt.title(f"mlp ({hidden1}, {hidden2}, {z_dim}) seed={seed} | axis={prune_axis} | pruned: {layer_part}")
-  plt.xlabel("percent of neurons pruned")
-  plt.ylabel("test loss")
-  plt.grid(True, alpha=0.3)
-  plt.legend()
-  layer_key = "_".join(layer_names)
-  save_name = f"mlp_prune_{prune_axis}_h1_{hidden1}_h2_{hidden2}_z_{z_dim}_seed_{seed}_{layer_key}.png"
-  save_path = os.path.join(plots_dir, save_name)
-  plt.savefig(save_path, dpi=300, bbox_inches="tight")
-  plt.close()
-  return save_path
+def output_json_path(save_root: str, prune_axis: str) -> str:
+  return os.path.join(save_root, f"mlp_pruning_report_{prune_axis}.json")
 
 
 def parse_args() -> argparse.Namespace:
-  parser = argparse.ArgumentParser(description="inspect mlp pruning stability across betas")
+  parser = argparse.ArgumentParser(description="inspect mlp pruning stability across an entire save root")
   parser.add_argument("--save_root", type=str, required=True, help="directory containing saved model runs")
-  parser.add_argument("--hidden1", type=int, required=True, help="first hidden layer width")
-  parser.add_argument("--hidden2", type=int, required=True, help="second hidden layer width")
-  parser.add_argument("--z_dim", type=int, required=True, help="latent bottleneck size")
-  parser.add_argument("--seed", type=int, required=True, help="random seed")
-  parser.add_argument("--prune_axis", choices=["row", "col"], default="row", help="prune ranked weight rows (out) or columns (in)")
+  parser.add_argument("--prune_axis", choices=["row", "col"], default="row", help="prune ranked weight rows or columns")
   return parser.parse_args()
 
 
 if __name__ == "__main__":
   args = parse_args()
-  hidden1 = args.hidden1
-  hidden2 = args.hidden2
-  z_dim = args.z_dim
-  seed = args.seed
-  save_root = args.save_root
-  prune_axis = args.prune_axis
-  runs = parse_run_specs(
-    root_dir=save_root,
-    target_hidden1=hidden1,
-    target_hidden2=hidden2,
-    target_z_dim=z_dim,
-    target_seed=seed,
-    lr_filter=target_lr,
-    epochs_filter=target_epochs,
-  )
-  if not runs:
-    raise RuntimeError(
-      f"no runs found for h1={hidden1}, h2={hidden2}, z={z_dim}, seed={seed}, lr={target_lr}, epochs={target_epochs}"
-    )
-
-  #print("selected runs:")
-  #for run in runs:
-  #  print(f"- beta={run.beta:g} lr={run.lr:g} epochs={run.epochs} dir={run.run_name}")
-
-  for current_layers_to_prune in prune_layer_sets:
-    curves = run_pruning_stability(
-      runs=runs,
-      hidden1=hidden1,
-      hidden2=hidden2,
-      z_dim=z_dim,
-      layer_names=current_layers_to_prune,
-      prune_fn=neuron_prune_layers,
-      prune_percent_values=prune_percents,
-      prune_axis=prune_axis,
-    )
-    save_path = plot_curves(curves, hidden1, hidden2, z_dim, seed, current_layers_to_prune, prune_axis)
-    print(f"\nplot saved to: {save_path}")
-
-  # input("press enter to terminate...")
+  if not os.path.isdir(args.save_root):
+    raise RuntimeError(f"save_root does not exist or is not a directory: {args.save_root}")
+  report = build_report(args.save_root, args.prune_axis)
+  json_path = output_json_path(args.save_root, args.prune_axis)
+  with open(json_path, "w", encoding="utf-8") as f:
+    json.dump(report, f, indent=2)
+  print(f"\njson saved to: {json_path}")
