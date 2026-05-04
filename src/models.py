@@ -1,7 +1,0 @@
-# lenet
-# cnn lenet ?
-# .
-# .
-# .
-
-
