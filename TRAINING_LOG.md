@@ -29,8 +29,6 @@ done
 - [X] Size 2: 256 -> 4 -> 64 [0.5, 0.4, 0.3, 0.2, 0.1, 0.01, 0.001, 0.0001]
 - [X] Size 3: 512 -> 4 -> 128 [0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1, 0.01]
 
----
-
 ### 2136623168
 #### Trained 1
 - [X] Size 1: 386 -> 15 -> 128 [0.5, 0.4, 0.3, 0.2, 0.1, 0.01, 0.001, 0.0001]
@@ -84,3 +82,58 @@ done
 - Size 1:
 - Size 2:
 - Learning rate: 2e-4
+
+### 42
+#### Trained 1
+- [ ] Size 1:
+- [ ] Size 2:
+- [ ] Size 3:
+
+#### Trained 2 (smaller bottleneck layers)
+- [ ] Size 1:
+- [ ] Size 2:
+- [ ] Size 3:
+
+### 2136623168
+#### Trained 1
+- [ ] Size 1:
+- [ ] Size 2:
+- [ ] Size 3:
+
+#### Trained 2 (smaller bottleneck layers)
+- [ ] Size 1:
+- [ ] Size 2:
+- [ ] Size 3:
+
+### 3824702233
+#### Trained 1
+- [ ] Size 1:
+- [ ] Size 2:
+- [ ] Size 3:
+
+#### Trained 2 (smaller bottleneck layers)
+- [ ] Size 1:
+- [ ] Size 2:
+- [ ] Size 3:
+
+### 416282721
+#### Trained 1
+- [ ] Size 1:
+- [ ] Size 2:
+- [ ] Size 3:
+
+#### Trained 2 (smaller bottleneck layers)
+- [ ] Size 1:
+- [ ] Size 2:
+- [ ] Size 3:
+
+### 3991408081
+#### Trained 1
+- [ ] Size 1:
+- [ ] Size 2:
+- [ ] Size 3:
+
+#### Trained 2 (smaller bottleneck layers)
+- [ ] Size 1:
+- [ ] Size 2:
+- [ ] Size 3:

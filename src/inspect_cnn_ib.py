@@ -40,16 +40,20 @@ if not os.path.isdir(run_dir):
     raise FileNotFoundError(f"run_dir not found: {run_dir}")
 
 run_name = os.path.basename(run_dir)
-match = re.match(r"^vib_(mlp|cnn)_(\d+)_(\d+)_(\d+)_([0-9.eE+-]+)_([0-9.eE+-]+)(?:_(\d+))?$", run_name)
+match = re.match(
+  r"^vib_(mlp|cnn)_(\d+)_(\d+)(?:_(\d+))?_(\d+)_([0-9.eE+-]+)_([0-9.eE+-]+)_(\d+)_(\d+)$",
+  run_name,
+)
 if not match:
   raise ValueError(
-    f"run_dir name must match: vib_<model>_<hidden1>_<hidden2>_<z_dim>_<beta>_<lr>[_<epochs>], got: {run_name}"
+    f"run_dir name must match: vib_<model>_<hidden1>_<hidden2>_[_<decoder_hidden>]_<z_dim>_<beta>_<lr>_<epochs>_<seed>, got: {run_name}"
   )
-model_name, h1_s, h2_s, z_dim_s, beta_s, _, _ = match.groups()
+model_name, h1_s, h2_s, decoder_hidden_s, z_dim_s, beta_s, _, _, _ = match.groups()
 if model_name != "cnn":
   raise ValueError(f"this script currently supports cnn runs only, got model: {model_name}")
 h1 = int(h1_s)
 h2 = int(h2_s)
+decoder_hidden = int(decoder_hidden_s) if decoder_hidden_s is not None else h2
 z_dim = int(z_dim_s)
 beta = float(beta_s)
 
@@ -58,7 +62,7 @@ if not pth_candidates:
   raise FileNotFoundError(f"no .pth file found in: {run_dir}")
 weights_path = os.path.join(run_dir, pth_candidates[0])
 weights = torch.load(weights_path, map_location="cpu")
-model = VIBNet(z_dim, input_shape, h1, h2, o_shape)
+model = VIBNet(z_dim, input_shape, h1, h2, decoder_hidden, o_shape)
 model.load_state_dict(weights)
 
 
@@ -155,7 +159,7 @@ test_loader = DataLoader(CIFAR10Dataset("data/CIFAR-10/", train=False), batch_si
 base_loss, _, _, base_acc = evaluate_epoch(model.to(device), test_loader, device, beta=beta)
 print(f"before prune: loss={base_loss:.6f}, acc={base_acc:.2f}")
 for pct in [0.95, 0.90, 0.85, 0.80, 0.75, 0.70, 0.65, 0.60, 0.55]:
-  pruned_model = VIBNet(z_dim, input_shape, h1, h2, o_shape).to(device)
+  pruned_model = VIBNet(z_dim, input_shape, h1, h2, decoder_hidden, o_shape).to(device)
   pruned_model.load_state_dict(weights)
   magnitude_prune_top_percent(pruned_model, pct)
   loss, _, _, acc = evaluate_epoch(pruned_model, test_loader, device, beta=beta)

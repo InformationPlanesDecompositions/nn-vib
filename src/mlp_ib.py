@@ -2,7 +2,7 @@
 import argparse
 import torch
 import torch.nn.functional as F
-from torch import nn
+from torch import nn, optim
 from msc import VIBNetParams, CIFAR10Dataset, run_training_job, FashionMnistIdxDataset
 
 
@@ -63,4 +63,5 @@ if __name__ == "__main__":
   train_dataset = FashionMnistIdxDataset("data/mnist_fashion/", train=True)
   test_dataset = FashionMnistIdxDataset("data/mnist_fashion/", train=False)
   model = VIBNet(params.z_dim, 784, params.hidden1, params.hidden2, 10)
-  run_training_job(model, params, train_dataset, test_dataset)
+  optimizer = optim.Adam(model.parameters(), lr=params.lr, betas=(0.5, 0.999))
+  run_training_job(model, optimizer, params, train_dataset, test_dataset)

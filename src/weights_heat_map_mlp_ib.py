@@ -39,12 +39,12 @@ if not os.path.isdir(run_dir):
     raise FileNotFoundError(f"run_dir not found: {run_dir}")
 
 run_name = os.path.basename(run_dir)
-match = re.match(r"^vib_(mlp|cnn)_(\d+)_(\d+)_(\d+)_([0-9.eE+-]+)_([0-9.eE+-]+)(?:_(\d+))?$", run_name)
+match = re.match(r"^vib_(mlp|cnn)_(\d+)_(\d+)_(\d+)_([0-9.eE+-]+)_([0-9.eE+-]+)_(\d+)_(\d+)$", run_name)
 if not match:
   raise ValueError(
-    f"run_dir name must match: vib_<model>_<hidden1>_<hidden2>_<z_dim>_<beta>_<lr>[_<epochs>], got: {run_name}"
+    f"run_dir name must match: vib_<model>_<hidden1>_<hidden2>_<z_dim>_<beta>_<lr>_<epochs>_<seed>, got: {run_name}"
   )
-model_name, h1_s, h2_s, z_dim_s, beta_s, _, _ = match.groups()
+model_name, h1_s, h2_s, z_dim_s, beta_s, _, _, _ = match.groups()
 if model_name != "mlp":
   raise ValueError(f"this script currently supports mlp runs only, got model: {model_name}")
 h1 = int(h1_s)

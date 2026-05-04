@@ -19,7 +19,8 @@ output_shape = 10
 batch_size = 128
 
 # pruning experiment config
-layers_to_prune = ["fc_mu", "fc_logvar", "fc2"]
+#layers_to_prune = ["fc_mu", "fc_logvar", "fc2"]
+layers_to_prune = ["fc1"]
 layers_to_prune_fc2_only = ["fc2"]
 prune_layer_sets = [layers_to_prune, layers_to_prune_fc2_only]
 prune_percents = [0.0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7]

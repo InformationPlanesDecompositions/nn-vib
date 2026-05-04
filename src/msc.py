@@ -79,6 +79,7 @@ class VIBNetParams:
   z_dim: int
   hidden1: int
   hidden2: int
+  decoder_hidden: int | None
   lr: float
   batch_size: int
   epochs: int
@@ -93,6 +94,7 @@ class VIBNetParams:
       z_dim=args.z_dim,
       hidden1=args.hidden1,
       hidden2=args.hidden2,
+      decoder_hidden=getattr(args, "decoder_hidden", None),
       lr=args.lr,
       batch_size=args.batch_size,
       epochs=args.epochs,
@@ -101,6 +103,11 @@ class VIBNetParams:
     )
 
   def file_name(self) -> str:
+    if self.model_name == "cnn" and self.decoder_hidden is not None:
+      return (
+        f"vib_{self.model_name}_{self.hidden1}_{self.hidden2}_{self.decoder_hidden}_"
+        f"{self.z_dim}_{self.beta}_{self.lr}_{self.epochs}_{self.rnd_seed}"
+      )
     return f"vib_{self.model_name}_{self.hidden1}_{self.hidden2}_{self.z_dim}_{self.beta}_{self.lr}_{self.epochs}_{self.rnd_seed}"
 
   def save_dir(self) -> str:
@@ -108,8 +115,10 @@ class VIBNetParams:
     os.makedirs(s, exist_ok=True)
     return f"{s}/{self.file_name()}"
 
-  def to_json(self, test_losses, test_accuracy, ce_kls):
+  def to_json(self, train_loss, train_accuracy, test_losses, test_accuracy, ce_kls):
     return {
+      "train_loss": train_loss,
+      "train_acc": train_accuracy,
       "test_losses": test_losses,
       "test_acc": test_accuracy,
       "ce_kls": ce_kls,
@@ -117,6 +126,7 @@ class VIBNetParams:
       "z_dim": self.z_dim,
       "hidden1": self.hidden1,
       "hidden2": self.hidden2,
+      "decoder_hidden": self.decoder_hidden,
       "lr": self.lr,
       "batch_size": self.batch_size,
       "epochs": self.epochs,
@@ -131,6 +141,7 @@ class VIBNetParams:
       f"\tz_dim         = {self.z_dim}\n"
       f"\thidden1       = {self.hidden1}\n"
       f"\thidden2       = {self.hidden2}\n"
+      f"\tdecoder_hidden= {self.decoder_hidden}\n"
       f"\tlr            = {self.lr}\n"
       f"\tepochs        = {self.epochs}\n"
       f"\tbatch_size    = {self.batch_size}\n"
@@ -386,28 +397,37 @@ def evaluate_epoch(
 ) -> Tuple[float, float, float, float]:
   model.eval()
   with torch.no_grad():
-    # build one large tensor to run MC prediction over the full eval set.
-    batches = list(dataloader)
-    Xs, Ys = zip(*batches)
-    X = torch.cat(Xs, dim=0).to(device)
-    Y = torch.cat(Ys, dim=0).to(device)
-    logits, mu, sigma = model(X)
-    probs_sum = F.softmax(logits, dim=1)
-    # monte carlo average over latent samples z for p(y|x).
-    for _ in range(mc_samples - 1):
-      logits, _, _ = model(X)
-      probs_sum += F.softmax(logits, dim=1)
-    probs = probs_sum / mc_samples
-    # ce is computed from averaged predictive probabilities.
-    ce = F.nll_loss(torch.log(probs.clamp_min(1e-8)), Y)
-    variance = sigma.pow(2)
-    log_variance = 2 * torch.log(sigma)
-    kl_terms = 0.5 * (variance + mu.pow(2) - 1.0 - log_variance)
-    kl = torch.sum(kl_terms, dim=1).mean()
-    loss = ce + beta * kl
-    _, preds = torch.max(probs, 1)
-    acc = 100.0 * (preds == Y).float().mean().item()
-  return loss.item(), ce.item(), kl.item(), acc
+    total = 0
+    total_ce = 0.0
+    total_kl = 0.0
+    total_correct = 0
+    for X, Y in dataloader:
+      X, Y = X.to(device), Y.to(device)
+      bs = X.size(0)
+      logits, mu, sigma = model(X)
+      probs_sum = F.softmax(logits, dim=1)
+      # monte carlo average over latent samples z for p(y|x), kept per-batch to avoid OOM.
+      for _ in range(mc_samples - 1):
+        logits, _, _ = model(X)
+        probs_sum += F.softmax(logits, dim=1)
+      probs = probs_sum / mc_samples
+      ce = F.nll_loss(torch.log(probs.clamp_min(1e-8)), Y)
+      variance = sigma.pow(2)
+      log_variance = 2 * torch.log(sigma)
+      kl_terms = 0.5 * (variance + mu.pow(2) - 1.0 - log_variance)
+      kl = torch.sum(kl_terms, dim=1).mean()
+      _, preds = torch.max(probs, 1)
+
+      total += bs
+      total_ce += ce.item() * bs
+      total_kl += kl.item() * bs
+      total_correct += (preds == Y).sum().item()
+
+    avg_ce = total_ce / total
+    avg_kl = total_kl / total
+    loss = avg_ce + beta * avg_kl
+    acc = 100.0 * total_correct / total
+  return loss, avg_ce, avg_kl, acc
 
 
 def train_model(
@@ -418,9 +438,11 @@ def train_model(
   device: torch.device,
   epochs: int,
   beta: float,
-) -> Tuple[List[float], List[float], List[float], List[float]]:
+) -> Tuple[List[float], List[float], List[float], List[float], float, float]:
   model.to(device)
   train_losses, test_losses, test_ces, test_kls = [], [], [], []
+  final_train_loss = 0.0
+  final_train_acc = 0.0
   for epoch in range(epochs):
     train_loss, train_acc = train_epoch(
       model,
@@ -429,25 +451,29 @@ def train_model(
       device,
       beta=beta,
     )
-    test_loss, ce, kl, test_acc = evaluate_epoch(
-      model,
-      test_loader,
-      device,
-      beta=beta,
-    )
-    print(
-      f"""epoch [{epoch + 1}/{epochs}] β({beta}) train loss: {train_loss:.3f} | train acc: {train_acc:.2f}%
-\t\t\ttest loss: {test_loss:.3f} | test acc: {test_acc:.2f}%"""
-    )
-    train_losses.append(train_loss)
-    test_losses.append(test_loss)
-    test_ces.append(ce)
-    test_kls.append(kl)
-  return train_losses, test_losses, test_ces, test_kls
+    final_train_loss = train_loss
+    final_train_acc = train_acc
+    if epoch % 10 == 0:
+      test_loss, ce, kl, test_acc = evaluate_epoch(
+        model,
+        test_loader,
+        device,
+        beta=beta,
+      )
+      print(
+        f"""epoch [{epoch + 1}/{epochs}] β({beta}) train loss: {train_loss:.3f} | train acc: {train_acc:.2f}%
+  \t\t\ttest loss: {test_loss:.3f} | test acc: {test_acc:.2f}%"""
+      )
+      train_losses.append(train_loss)
+      test_losses.append(test_loss)
+      test_ces.append(ce)
+      test_kls.append(kl)
+  return train_losses, test_losses, test_ces, test_kls, final_train_loss, final_train_acc
 
 
 def run_training_job(
   model: nn.Module,
+  optimizer: optim.Optimizer,
   params: VIBNetParams,
   train_dataset: Dataset,
   test_dataset: Dataset,
@@ -460,8 +486,7 @@ def run_training_job(
   train_loader = DataLoader(train_dataset, params.batch_size, shuffle=True)
   test_loader = DataLoader(test_dataset, params.batch_size, shuffle=False)
   print(f"# of model parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad)}")
-  optimizer = optim.Adam(model.parameters(), lr=params.lr, betas=(0.5, 0.999))
-  train_losses, test_losses, test_ces, test_kls = train_model(
+  train_losses, test_losses, test_ces, test_kls, train_loss, train_acc = train_model(
     model,
     train_loader,
     test_loader,
@@ -475,7 +500,7 @@ def run_training_job(
   torch.save(model.state_dict(), f"{params.save_dir()}.pth")
   with open(f"{params.save_dir()}_stats.json", "w") as json_file:
     json.dump(
-      params.to_json(test_losses, test_acc, list(zip(test_ces, test_kls))),
+      params.to_json(train_loss, train_acc, test_losses, test_acc, list(zip(test_ces, test_kls))),
       json_file,
       indent=2,
     )
