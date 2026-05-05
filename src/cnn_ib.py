@@ -2,6 +2,7 @@
 import argparse
 import torch
 from torch import nn, optim
+from torchvision import transforms
 from msc import VIBNetParams, CIFAR10Dataset, run_training_job
 
 
@@ -82,9 +83,29 @@ if __name__ == "__main__":
   parser.add_argument("--batch_size", type=int, default=128, help="batch size")
   parser.add_argument("--data_dir", type=str, default="data/CIFAR-10/", help="dataset path")
   args = parser.parse_args()
+
+  mean = (0.4914, 0.4822, 0.4465)
+  std = (0.2023, 0.1994, 0.2010)
+
+  train_transform = transforms.Compose(
+    [
+      transforms.ToTensor(),
+      transforms.RandomCrop(32, padding=4),
+      transforms.RandomHorizontalFlip(),
+      transforms.Normalize(mean, std),
+    ]
+  )
+
+  test_transform = transforms.Compose(
+    [
+      transforms.ToTensor(),
+      transforms.Normalize(mean, std),
+    ]
+  )
+
   params = VIBNetParams.from_args(args, "cnn")
   model = VIBNet(params.z_dim, (3, 32, 32), params.hidden1, params.hidden2, args.decoder_hidden, 10)
   optimizer = optim.Adam(model.parameters(), lr=params.lr)
-  train_dataset = CIFAR10Dataset(args.data_dir, train=True)
-  test_dataset = CIFAR10Dataset(args.data_dir, train=False)
+  train_dataset = CIFAR10Dataset(args.data_dir, train=True, transform=train_transform)
+  test_dataset = CIFAR10Dataset(args.data_dir, train=False, transform=test_transform)
   run_training_job(model, optimizer, params, train_dataset, test_dataset)

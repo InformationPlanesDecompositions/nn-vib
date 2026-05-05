@@ -305,8 +305,9 @@ class FashionMnistIdxDataset(Dataset):
 class CIFAR10Dataset(Dataset):
   """https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz"""
 
-  def __init__(self, data_dir: str, train: bool = True):
+  def __init__(self, data_dir: str, train: bool = True, transform=None):
     self.data_dir = data_dir
+    self.transform = transform
     batch_files = [f"data_batch_{i}" for i in range(1, 6)] if train else ["test_batch"]
     image_batches, label_batches = [], []
 
@@ -321,18 +322,26 @@ class CIFAR10Dataset(Dataset):
       image_batches.append(data)
       label_batches.append(labels)
 
-    images_np = np.vstack(image_batches).astype(np.float32)
+    images_np = np.vstack(image_batches).astype(np.uint8)
     labels_np = np.array(sum(label_batches, []), dtype=np.int64)
-    images_np = images_np.reshape(-1, 3, 32, 32) / 255.0
 
-    self.images = torch.from_numpy(images_np.copy())
+    # store as HWC so torchvision image transforms work naturally.
+    self.images = images_np.reshape(-1, 3, 32, 32).transpose(0, 2, 3, 1)
     self.labels = torch.from_numpy(labels_np.copy())
 
   def __len__(self) -> int:
     return len(self.labels)
 
   def __getitem__(self, idx: int):
-    return self.images[idx], self.labels[idx]
+    image = self.images[idx]
+    label = self.labels[idx]
+
+    if self.transform is not None:
+      image = self.transform(image)
+    else:
+      image = torch.from_numpy(image.transpose(2, 0, 1)).float() / 255.0
+
+    return image, label
 
 
 def weights_location(h1, h2, z_dim, beta, lr):
@@ -483,8 +492,17 @@ def run_training_job(
   if torch.cuda.is_available():
     torch.cuda.manual_seed(seed)
   print(params)
-  train_loader = DataLoader(train_dataset, params.batch_size, shuffle=True)
-  test_loader = DataLoader(test_dataset, params.batch_size, shuffle=False)
+  num_workers = min(4, os.cpu_count() or 0)
+  pin_memory = params.device.type == "cuda"
+  loader_kwargs = {
+    "batch_size": params.batch_size,
+    "num_workers": num_workers,
+    "pin_memory": pin_memory,
+  }
+  if num_workers > 0:
+    loader_kwargs["persistent_workers"] = True
+  train_loader = DataLoader(train_dataset, shuffle=True, **loader_kwargs)
+  test_loader = DataLoader(test_dataset, shuffle=False, **loader_kwargs)
   print(f"# of model parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad)}")
   train_losses, test_losses, test_ces, test_kls, train_loss, train_acc = train_model(
     model,
