@@ -17,8 +17,10 @@ class VIBNet(nn.Module):
   ):
     super().__init__()
     self.fc1 = nn.Linear(input_shape, hidden1)
+
     self.fc_mu = nn.Linear(hidden1, z_dim)
     self.fc_logvar = nn.Linear(hidden1, z_dim)
+
     self.fc2 = nn.Linear(z_dim, hidden2)
     self.fc_decode = nn.Linear(hidden2, output_shape)
 

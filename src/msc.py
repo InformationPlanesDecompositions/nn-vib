@@ -115,13 +115,14 @@ class VIBNetParams:
     os.makedirs(s, exist_ok=True)
     return f"{s}/{self.file_name()}"
 
-  def to_json(self, train_loss, train_accuracy, test_losses, test_accuracy, ce_kls):
+  def to_json(self, train_loss, train_accuracy, test_losses, test_accuracy, ce_kls, best_epoch):
     return {
       "train_loss": train_loss,
       "train_acc": train_accuracy,
       "test_losses": test_losses,
       "test_acc": test_accuracy,
       "ce_kls": ce_kls,
+      "best_epoch": best_epoch,
       "beta": self.beta,
       "z_dim": self.z_dim,
       "hidden1": self.hidden1,
@@ -447,11 +448,14 @@ def train_model(
   device: torch.device,
   epochs: int,
   beta: float,
-) -> Tuple[List[float], List[float], List[float], List[float], float, float]:
+) -> Tuple[List[float], List[float], List[float], List[float], float, float, int, dict[str, torch.Tensor]]:
   model.to(device)
   train_losses, test_losses, test_ces, test_kls = [], [], [], []
   final_train_loss = 0.0
   final_train_acc = 0.0
+  best_epoch = 1
+  best_test_loss = float("inf")
+  best_state_dict = {key: value.detach().cpu().clone() for key, value in model.state_dict().items()}
   for epoch in range(epochs):
     train_loss, train_acc = train_epoch(
       model,
@@ -473,11 +477,15 @@ def train_model(
         f"""epoch [{epoch + 1}/{epochs}] β({beta}) train loss: {train_loss:.3f} | train acc: {train_acc:.2f}%
   \t\t\ttest loss: {test_loss:.3f} | test acc: {test_acc:.2f}%"""
       )
+      if test_loss < best_test_loss:
+        best_test_loss = test_loss
+        best_epoch = epoch + 1
+        best_state_dict = {key: value.detach().cpu().clone() for key, value in model.state_dict().items()}
       train_losses.append(train_loss)
       test_losses.append(test_loss)
       test_ces.append(ce)
       test_kls.append(kl)
-  return train_losses, test_losses, test_ces, test_kls, final_train_loss, final_train_acc
+  return train_losses, test_losses, test_ces, test_kls, final_train_loss, final_train_acc, best_epoch, best_state_dict
 
 
 def run_training_job(
@@ -504,7 +512,7 @@ def run_training_job(
   train_loader = DataLoader(train_dataset, shuffle=True, **loader_kwargs)
   test_loader = DataLoader(test_dataset, shuffle=False, **loader_kwargs)
   print(f"# of model parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad)}")
-  train_losses, test_losses, test_ces, test_kls, train_loss, train_acc = train_model(
+  train_losses, test_losses, test_ces, test_kls, train_loss, train_acc, best_epoch, best_state_dict = train_model(
     model,
     train_loader,
     test_loader,
@@ -513,12 +521,14 @@ def run_training_job(
     params.epochs,
     beta=params.beta,
   )
+  model.load_state_dict(best_state_dict)
   test_loss, _, _, test_acc = evaluate_epoch(model, test_loader, params.device, params.beta)
+  print(f"best eval epoch: {best_epoch}")
   print(f"lr: {params.lr}, test loss: {test_loss}, test acc: {test_acc}")
   torch.save(model.state_dict(), f"{params.save_dir()}.pth")
   with open(f"{params.save_dir()}_stats.json", "w") as json_file:
     json.dump(
-      params.to_json(train_loss, train_acc, test_losses, test_acc, list(zip(test_ces, test_kls))),
+      params.to_json(train_loss, train_acc, test_losses, test_acc, list(zip(test_ces, test_kls)), best_epoch),
       json_file,
       indent=2,
     )
