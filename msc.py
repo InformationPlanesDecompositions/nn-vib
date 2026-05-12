@@ -11,56 +11,6 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 
 
-def plot_x_y(
-  xs: List,
-  ys1: List,
-  ys2: Optional[List],
-  xlabel: str,
-  ylabel: str,
-  line_1_label: str,
-  line_2_label: Optional[str],
-  xlog: bool,
-  point_labels: bool,
-):
-  fig, ax = plt.subplots(figsize=(10, 6))
-
-  ax.plot(xs, ys1, marker="o", linestyle="-", color="b", label=line_1_label)
-  if ys2 and line_2_label:
-    ax.plot(xs, ys2, marker="x", linestyle="--", color="r", label=line_2_label)
-
-  if xlog:
-    ax.set_xscale("log")
-
-  ax.set_title(f"{ylabel} vs {xlabel}")
-  ax.set_xlabel(xlabel)
-  ax.set_ylabel(ylabel)
-
-  if point_labels:
-    for x, y in zip(xs, ys1):
-      ax.text(
-        x,
-        y,
-        f"({x:.4f}, {y:.2f})",
-        fontsize=8,
-        verticalalignment="bottom",
-        horizontalalignment="right",
-      )
-
-      if ys2:
-        for x, y in zip(xs, ys2):
-          ax.text(
-            x,
-            y,
-            f"({x:.4f}, {y:.2f})",
-            fontsize=8,
-            verticalalignment="top",
-            horizontalalignment="left",
-          )
-
-  ax.legend()
-  return fig, ax
-
-
 def get_device():
   device = ""
   if torch.cuda.is_available():
@@ -115,14 +65,12 @@ class VIBNetParams:
     os.makedirs(s, exist_ok=True)
     return f"{s}/{self.file_name()}"
 
-  def to_json(self, train_loss, train_accuracy, test_losses, test_accuracy, ce_kls, best_epoch):
+  def to_json(self, train_loss, train_accuracy, test_losses, test_accuracy):
     return {
       "train_loss": train_loss,
       "train_acc": train_accuracy,
       "test_losses": test_losses,
       "test_acc": test_accuracy,
-      "ce_kls": ce_kls,
-      "best_epoch": best_epoch,
       "beta": self.beta,
       "z_dim": self.z_dim,
       "hidden1": self.hidden1,
@@ -164,90 +112,6 @@ def load_weights(filepath, verbose=True):
         print(f"- {key} with shape {weights[key].shape}")
 
   return weights
-
-
-def plot_information_plane(ces: List[float], kls: List[float], save_dir: str):
-  assert len(ces) == len(kls)
-
-  i_x_t = np.array(kls)
-  i_t_y = np.array(ces)
-  epochs = np.arange(len(i_x_t))
-  num_epochs = len(epochs)
-
-  plt.figure(figsize=(12, 8))
-  cmap_name = "viridis"
-  cmap_instance = plt.get_cmap(cmap_name)
-
-  norm = plt.Normalize(vmin=epochs.min(), vmax=epochs.max())
-
-  for i in range(num_epochs - 1):
-    color = cmap_instance(norm(epochs[i]))
-    plt.plot(
-      i_x_t[i : i + 2],
-      i_t_y[i : i + 2],
-      color=color,
-      linestyle="-",
-      linewidth=2,
-      alpha=0.7,
-      zorder=1,
-    )
-
-  scatter = plt.scatter(
-    i_x_t,
-    i_t_y,
-    c=epochs,
-    cmap=cmap_name,
-    norm=norm,
-    marker="o",
-    s=50,
-    alpha=1.0,
-    zorder=2,
-  )
-
-  cbar = plt.colorbar(scatter)
-  cbar.set_label("epoch", rotation=270, labelpad=15, fontsize=12)
-  plt.xscale("log")
-  plt.title(f"Information Plane", fontsize=16)
-  plt.xlabel("I(X;Z)", fontsize=14)
-  plt.ylabel("I(Z;Y)", fontsize=14)
-  plt.grid(True, linestyle="--", alpha=0.5)
-  plt.savefig(f"{save_dir}_info_plane.png", dpi=300)
-  plt.close()
-
-
-# TODO: plot ce, kl, loss for both test and train so 2 sub plots
-def plot_losses(
-  test_losses: List[float],
-  train_losses: List[float],
-  file_name: str,
-  save_dir: str,
-) -> None:
-  epochs = len(test_losses)
-  plt.figure(figsize=(10, 6))
-  plt.plot(
-    range(1, epochs + 1),
-    train_losses,
-    marker="o",
-    linewidth=2,
-    markersize=6,
-    color="#1f77b4",
-    label="training Loss",
-  )
-  plt.plot(
-    range(1, epochs + 1),
-    test_losses,
-    marker="o",
-    linewidth=2,
-    markersize=6,
-    color="#ff7f0e",
-    label="test Loss",
-  )
-  plt.title(f"({file_name}) loss", fontsize=16, fontweight="bold", pad=20)
-  plt.xlabel("epoch", fontsize=14)
-  plt.ylabel("loss", fontsize=14)
-  plt.grid(True, alpha=0.3)
-  plt.legend(fontsize=12)
-  plt.savefig(f"{save_dir}_test_loss.png", dpi=300, bbox_inches="tight")
 
 
 class MnistCsvDataset(Dataset):
@@ -369,35 +233,6 @@ def vib_loss(
   return ce, kl, total_loss
 
 
-def train_epoch(
-  model: nn.Module,
-  dataloader: DataLoader,
-  optimizer: optim.Optimizer,
-  device: torch.device,
-  beta: float,
-) -> Tuple[float, float]:
-  model.train()
-  running_loss = 0.0
-  correct = 0
-  total = 0
-  for X, Y in (tq := tqdm(dataloader, desc="training", leave=False)):
-    X, Y = X.to(device), Y.to(device)
-    optimizer.zero_grad()
-    logits, mu, sigma = model(X)
-    _, _, loss = vib_loss(logits, Y, mu, sigma, beta)
-    loss.backward()
-    optimizer.step()
-    bs = X.size(0)
-    running_loss += loss.item() * bs
-    _, preds = torch.max(logits, 1)
-    correct += (preds == Y).sum().item()
-    total += bs
-    tq.set_postfix({"loss": f"{loss.item():.4f}", "acc": f"{100.0 * correct / total:.2f}"})
-  avg_loss = running_loss / total
-  accuracy = 100.0 * correct / total
-  return avg_loss, accuracy
-
-
 def evaluate_epoch(
   model: nn.Module,
   dataloader: DataLoader,
@@ -438,99 +273,3 @@ def evaluate_epoch(
     loss = avg_ce + beta * avg_kl
     acc = 100.0 * total_correct / total
   return loss, avg_ce, avg_kl, acc
-
-
-def train_model(
-  model: nn.Module,
-  train_loader: DataLoader,
-  test_loader: DataLoader,
-  optimizer: optim.Optimizer,
-  device: torch.device,
-  epochs: int,
-  beta: float,
-) -> Tuple[List[float], List[float], List[float], List[float], float, float, int, dict[str, torch.Tensor]]:
-  model.to(device)
-  train_losses, test_losses, test_ces, test_kls = [], [], [], []
-  final_train_loss = 0.0
-  final_train_acc = 0.0
-  best_epoch = 1
-  best_test_loss = float("inf")
-  best_state_dict = {key: value.detach().cpu().clone() for key, value in model.state_dict().items()}
-  for epoch in range(epochs):
-    train_loss, train_acc = train_epoch(
-      model,
-      train_loader,
-      optimizer,
-      device,
-      beta=beta,
-    )
-    final_train_loss = train_loss
-    final_train_acc = train_acc
-    if epoch % 10 == 0:
-      test_loss, ce, kl, test_acc = evaluate_epoch(
-        model,
-        test_loader,
-        device,
-        beta=beta,
-      )
-      print(
-        f"""epoch [{epoch + 1}/{epochs}] β({beta}) train loss: {train_loss:.3f} | train acc: {train_acc:.2f}%
-  \t\t\ttest loss: {test_loss:.3f} | test acc: {test_acc:.2f}%"""
-      )
-      if test_loss < best_test_loss:
-        best_test_loss = test_loss
-        best_epoch = epoch + 1
-        best_state_dict = {key: value.detach().cpu().clone() for key, value in model.state_dict().items()}
-      train_losses.append(train_loss)
-      test_losses.append(test_loss)
-      test_ces.append(ce)
-      test_kls.append(kl)
-  return train_losses, test_losses, test_ces, test_kls, final_train_loss, final_train_acc, best_epoch, best_state_dict
-
-
-def run_training_job(
-  model: nn.Module,
-  optimizer: optim.Optimizer,
-  params: VIBNetParams,
-  train_dataset: Dataset,
-  test_dataset: Dataset,
-) -> None:
-  seed = params.rnd_seed if isinstance(params.rnd_seed, int) and not isinstance(params.rnd_seed, bool) else 42
-  torch.manual_seed(seed)
-  if torch.cuda.is_available():
-    torch.cuda.manual_seed(seed)
-  print(params)
-  num_workers = min(4, os.cpu_count() or 0)
-  pin_memory = params.device.type == "cuda"
-  loader_kwargs = {
-    "batch_size": params.batch_size,
-    "num_workers": num_workers,
-    "pin_memory": pin_memory,
-  }
-  if num_workers > 0:
-    loader_kwargs["persistent_workers"] = True
-  train_loader = DataLoader(train_dataset, shuffle=True, **loader_kwargs)
-  test_loader = DataLoader(test_dataset, shuffle=False, **loader_kwargs)
-  print(f"# of model parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad)}")
-  train_losses, test_losses, test_ces, test_kls, train_loss, train_acc, best_epoch, best_state_dict = train_model(
-    model,
-    train_loader,
-    test_loader,
-    optimizer,
-    params.device,
-    params.epochs,
-    beta=params.beta,
-  )
-  model.load_state_dict(best_state_dict)
-  test_loss, _, _, test_acc = evaluate_epoch(model, test_loader, params.device, params.beta)
-  print(f"best eval epoch: {best_epoch}")
-  print(f"lr: {params.lr}, test loss: {test_loss}, test acc: {test_acc}")
-  torch.save(model.state_dict(), f"{params.save_dir()}.pth")
-  with open(f"{params.save_dir()}_stats.json", "w") as json_file:
-    json.dump(
-      params.to_json(train_loss, train_acc, test_losses, test_acc, list(zip(test_ces, test_kls)), best_epoch),
-      json_file,
-      indent=2,
-    )
-  plot_losses(test_losses, train_losses, params.file_name(), params.save_dir())
-  plot_information_plane(test_ces, test_kls, params.save_dir())
