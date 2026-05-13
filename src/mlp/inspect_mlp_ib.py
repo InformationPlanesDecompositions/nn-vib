@@ -1,17 +1,12 @@
 #!/usr/bin/env python3
-import argparse
-import json
-import os
-import re
+import argparse, json, os, re
 from dataclasses import dataclass
 from datetime import datetime, timezone
-
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
-
-from mlp_ib import VIBNet
-from msc import FashionMnistIdxDataset, evaluate_epoch, get_device
+from mlp_ib import VIBMLP, evaluate_epoch
+from msc import FashionMnistIdxDataset, get_device
 
 # model and evaluation config
 input_shape = 784
@@ -25,7 +20,6 @@ layers_to_prune_fc2_only = ["fc2"]
 prune_layer_sets = [layers_to_prune, layers_to_prune_fc2_only]
 prune_percents = [0.0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7]
 
-
 @dataclass(frozen=True)
 class RunSpec:
   run_dir: str
@@ -38,6 +32,8 @@ class RunSpec:
   epochs: int
   seed: int
 
+# TODO: change from row/col to pruning based on incoming and outgoing weights
+#   like talked about
 
 def indices_above_avg_abs_threshold(
   model: nn.Module,
@@ -65,7 +61,6 @@ def indices_above_avg_abs_threshold(
   selected_pairs = avg_abs_by_idx[:count]
   return {idx: avg for idx, avg in selected_pairs}
 
-
 def inspect_top_neurons(
   model: nn.Module,
   layer_names: list[str],
@@ -79,7 +74,6 @@ def inspect_top_neurons(
     indices = indices_above_avg_abs_threshold(model, layer_name, layer_count, axis=axis, largest=largest)
     top_neurons[layer_name] = list(indices.keys())
   return top_neurons
-
 
 def neuron_prune_layers(model: nn.Module, layer_names: list[str], amount: float, axis: str = "row") -> None:
   if amount <= 0:
@@ -113,17 +107,16 @@ def neuron_prune_layers(model: nn.Module, layer_names: list[str], amount: float,
       else:
         module.weight[:, prune_idx] = 0
 
-
 def parse_all_run_specs(root_dir: str) -> list[RunSpec]:
   pattern = re.compile(r"^vib_mlp_(\d+)_(\d+)_(\d+)_([0-9.eE+-]+)_([0-9.eE+-]+)_(\d+)_(\d+)$")
   runs = []
   for run_name in os.listdir(root_dir):
     run_dir = os.path.join(root_dir, run_name)
-    if not os.path.isdir(run_dir):
-      continue
+    if not os.path.isdir(run_dir): continue
+
     match = pattern.match(run_name)
-    if not match:
-      continue
+    if not match: continue
+
     h1_s, h2_s, z_s, beta_s, lr_s, epochs_s, seed_s = match.groups()
     runs.append(
       RunSpec(
@@ -140,29 +133,27 @@ def parse_all_run_specs(root_dir: str) -> list[RunSpec]:
     )
   return sorted(runs, key=lambda run: (run.hidden1, run.hidden2, run.z_dim, run.seed, run.lr, run.epochs, run.beta))
 
-
 def load_state_dict_from_run(run_dir: str) -> dict[str, torch.Tensor]:
   pth_files = sorted([name for name in os.listdir(run_dir) if name.endswith(".pth")])
   if not pth_files:
     raise FileNotFoundError(f"no .pth file found in {run_dir}")
   return torch.load(os.path.join(run_dir, pth_files[0]), map_location="cpu")
 
-
 def config_key(run: RunSpec) -> tuple[int, int, int, int, float, int]:
   return (run.hidden1, run.hidden2, run.z_dim, run.seed, run.lr, run.epochs)
-
 
 def group_runs_by_config(runs: list[RunSpec]) -> list[tuple[tuple[int, int, int, int, float, int], list[RunSpec]]]:
   grouped = {}
   for run in runs:
     key = config_key(run)
     grouped.setdefault(key, []).append(run)
+
   items = []
   for key, config_runs in grouped.items():
     items.append((key, sorted(config_runs, key=lambda run: run.beta)))
+
   items.sort(key=lambda item: item[0])
   return items
-
 
 def evaluate_pruning_curve(
   run: RunSpec,
@@ -173,25 +164,27 @@ def evaluate_pruning_curve(
 ) -> dict[str, object]:
   print(f"  beta={run.beta:g} run={run.run_name}")
   state_dict = load_state_dict_from_run(run.run_dir)
-  losses = []
-  accuracies = []
+  losses, accs = [], []
+
   for prune_percent in prune_percents:
-    model = VIBNet(run.z_dim, input_shape, run.hidden1, run.hidden2, output_shape).to(device)
+    model = VIBMLP(run.z_dim, input_shape, run.hidden1, run.hidden2, output_shape).to(device)
     model.load_state_dict(state_dict)
+
     neuron_prune_layers(model, layer_names, prune_percent, axis=prune_axis)
-    loss, _, _, acc = evaluate_epoch(model, test_loader, device, beta=run.beta)
+    loss, acc = evaluate_epoch(model, test_loader, beta=run.beta)
+
     losses.append(float(loss))
-    accuracies.append(float(acc))
+    accs.append(float(acc))
     print(f"    prune={prune_percent * 100:>5.1f}% loss={loss:.6f} acc={acc:.2f}")
+
   return {
     "beta": run.beta,
     "run_name": run.run_name,
     "run_dir": run.run_dir,
     "prune_percents": prune_percents,
     "losses": losses,
-    "accuracies": accuracies,
+    "accuracies": accs,
   }
-
 
 def build_report(save_root: str, prune_axis: str) -> dict[str, object]:
   runs = parse_all_run_specs(save_root)
@@ -213,6 +206,7 @@ def build_report(save_root: str, prune_axis: str) -> dict[str, object]:
       f"[{config_idx}/{len(grouped_runs)}] h1={first_run.hidden1} h2={first_run.hidden2} "
       f"z={first_run.z_dim} seed={first_run.seed} lr={first_run.lr:g} epochs={first_run.epochs}"
     )
+
     layer_results = []
     for layer_names in prune_layer_sets:
       print(f"  layers={', '.join(layer_names)}")
@@ -220,6 +214,7 @@ def build_report(save_root: str, prune_axis: str) -> dict[str, object]:
       for run in config_runs:
         curves.append(evaluate_pruning_curve(run, layer_names, prune_axis, test_loader, device))
       layer_results.append({"layer_names": layer_names, "curves": curves})
+
     configs.append(
       {
         "hidden1": first_run.hidden1,
@@ -243,24 +238,19 @@ def build_report(save_root: str, prune_axis: str) -> dict[str, object]:
     "configs": configs,
   }
 
-
-def output_json_path(save_root: str, prune_axis: str) -> str:
-  return os.path.join(save_root, f"mlp_pruning_report_{prune_axis}.json")
-
-
 def parse_args() -> argparse.Namespace:
   parser = argparse.ArgumentParser(description="inspect mlp pruning stability across an entire save root")
   parser.add_argument("--save_root", type=str, required=True, help="directory containing saved model runs")
   parser.add_argument("--prune_axis", choices=["row", "col"], default="row", help="prune ranked weight rows or columns")
   return parser.parse_args()
 
-
 if __name__ == "__main__":
   args = parse_args()
   if not os.path.isdir(args.save_root):
     raise RuntimeError(f"save_root does not exist or is not a directory: {args.save_root}")
   report = build_report(args.save_root, args.prune_axis)
-  json_path = output_json_path(args.save_root, args.prune_axis)
-  with open(json_path, "w", encoding="utf-8") as f:
-    json.dump(report, f, indent=2)
+
+  json_path = os.path.join(args.save_root, f"mlp_pruning_report_{args.prune_axis}.json")
+  #json_path = output_json_path(args.save_root, args.prune_axis)
+  with open(json_path, "w", encoding="utf-8") as f: json.dump(report, f, indent=2)
   print(f"\njson saved to: {json_path}")
