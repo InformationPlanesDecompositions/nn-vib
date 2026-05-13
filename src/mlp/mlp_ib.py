@@ -11,7 +11,7 @@ parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, parent_dir)
 from msc import get_device, FashionMnistIdxDataset
 
-# rnd_seeds: [42, 2136623168, 3824702233, 416282721, 3991408081]
+# rnd_seeds: [2136623168, 3824702233, 416282721, 3991408081]
 # betas:     [0.5, 0.4, 0.3, 0.2, 0.1, 0.01, 0.001, 0.0001]
 # epochs:    300
 # lr:        2e-4
