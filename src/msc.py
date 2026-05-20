@@ -1,10 +1,12 @@
 import os, gzip, pickle, json
 import argparse
+from functools import lru_cache
 from dataclasses import dataclass
 from typing import Tuple
 import torch
 import torch.nn.functional as F
 from torch.utils.data import Dataset
+from torchvision import transforms
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -79,6 +81,36 @@ class FashionMnistIdxDataset(Dataset):
 
 class CIFAR10Dataset(Dataset):
   """https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz"""
+  @staticmethod
+  @lru_cache(maxsize=None)
+  def channel_stats(data_dir: str, train: bool = True) -> tuple[tuple[float, float, float], tuple[float, float, float]]:
+    dataset = CIFAR10Dataset(data_dir, train=train)
+    images = torch.from_numpy(dataset.images.copy()).float().div(255.0)
+    mean = tuple(images.mean(dim=(0, 1, 2)).tolist())
+    std = tuple(images.std(dim=(0, 1, 2), unbiased=False).tolist())
+    return mean, std
+
+  @staticmethod
+  def train_transform(data_dir: str):
+    mean, std = CIFAR10Dataset.channel_stats(data_dir, train=True)
+    return transforms.Compose(
+      [
+        transforms.ToTensor(),
+        transforms.RandomCrop(32, padding=4),
+        transforms.RandomHorizontalFlip(),
+        transforms.Normalize(mean, std),
+      ]
+    )
+
+  @staticmethod
+  def test_transform(data_dir: str):
+    mean, std = CIFAR10Dataset.channel_stats(data_dir, train=True)
+    return transforms.Compose(
+      [
+        transforms.ToTensor(),
+        transforms.Normalize(mean, std),
+      ]
+    )
 
   def __init__(self, data_dir: str, train: bool = True, transform=None):
     self.data_dir = data_dir

@@ -1,9 +1,91 @@
 #!/usr/bin/env python3
-import argparse
+from dataclasses import dataclass
+from typing import Tuple
+import os, json, argparse, sys
 import torch
+import torch.nn.functional as F
+from torch.utils.data import DataLoader
 from torch import nn, optim
-from torchvision import transforms
-from msc import VIBNetParams, CIFAR10Dataset, run_training_job
+from tqdm import tqdm
+
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, parent_dir)
+from msc import get_device, CIFAR10Dataset
+
+# GOAL: 70-76% test acc -> 0.8-1.3 CE Test Loss
+
+@dataclass
+class VIBCNNParams:
+  beta: float
+  z_dim: int
+  hidden1: int
+  hidden2: int
+  decoder_hidden: int
+  lr: float
+  batch_size: int
+  epochs: int
+  device: torch.device
+  rnd_seed: int
+
+  @classmethod
+  def from_args(cls, args: argparse.Namespace, device: torch.device):
+    return cls(
+      beta=args.beta,
+      z_dim=args.z_dim,
+      hidden1=args.hidden1,
+      hidden2=args.hidden2,
+      decoder_hidden=args.decoder_hidden,
+      lr=args.lr,
+      batch_size=args.batch_size,
+      epochs=args.epochs,
+      device=device,
+      rnd_seed=args.rnd_seed,
+    )
+
+  def file_name(self) -> str:
+    return (
+      f"vib_cnn_{self.hidden1}_{self.hidden2}_{self.decoder_hidden}_"
+      f"{self.z_dim}_{self.beta}_{self.lr}_{self.epochs}_{self.rnd_seed}"
+    )
+
+  def save_dir(self) -> str:
+    s = f"save_stats_weights/{self.file_name()}"
+    os.makedirs(s, exist_ok=True)
+    return f"{s}/{self.file_name()}"
+
+  def to_json(self, train_ce_losses, train_accs, test_ce_losses, test_accs):
+    return {
+      "train_ce_losses": train_ce_losses,
+      "train_accs": train_accs,
+      "test_ce_losses": test_ce_losses,
+      "test_accs": test_accs,
+      "beta": self.beta,
+      "z_dim": self.z_dim,
+      "hidden1": self.hidden1,
+      "hidden2": self.hidden2,
+      "decoder_hidden": self.decoder_hidden,
+      "lr": self.lr,
+      "batch_size": self.batch_size,
+      "epochs": self.epochs,
+      "rnd_seed": self.rnd_seed,
+    }
+
+  def __str__(self):
+    return (
+      f"hyperparameters:\n"
+      f"\tmodel         = cnn\n"
+      f"\tbeta          = {self.beta}\n"
+      f"\tz_dim         = {self.z_dim}\n"
+      f"\thidden1       = {self.hidden1}\n"
+      f"\thidden2       = {self.hidden2}\n"
+      f"\tdecoder_hidden= {self.decoder_hidden}\n"
+      f"\tlr            = {self.lr}\n"
+      f"\tepochs        = {self.epochs}\n"
+      f"\tbatch_size    = {self.batch_size}\n"
+      f"\tdevice        = {self.device}\n"
+      f"\trnd_seed      = {self.rnd_seed}\n"
+      f"\tsave_dir      = {self.save_dir()}"
+    )
 
 
 class VIBNet(nn.Module):
@@ -17,33 +99,32 @@ class VIBNet(nn.Module):
     output_shape: int,
   ):
     super().__init__()
-
     channels, _, _ = input_shape
 
-    self.encoder = nn.Sequential(
-      nn.Conv2d(channels, hidden1, kernel_size=3, padding=1),
-      nn.BatchNorm2d(hidden1),
-      nn.ReLU(inplace=True),
-      nn.Conv2d(hidden1, hidden1, kernel_size=3, padding=1),
-      nn.BatchNorm2d(hidden1),
-      nn.ReLU(inplace=True),
-      nn.MaxPool2d(2, 2),
+    self.conv1 = nn.Conv2d(channels, hidden1, kernel_size=5)
+    self.conv2 = nn.Conv2d(hidden1, hidden2, kernel_size=5)
+    self.pool = nn.AvgPool2d(kernel_size=2, stride=2)
 
-      nn.Conv2d(hidden1, hidden2, kernel_size=3, padding=1),
-      nn.BatchNorm2d(hidden2),
-      nn.ReLU(inplace=True),
-      nn.AdaptiveAvgPool2d(1),
-    )
-    self.flat_dim = hidden2
+    with torch.no_grad():
+      dummy = torch.zeros(1, *input_shape)
+      flat_dim = self._forward_features(dummy).shape[1]
 
-    self.fc_mu = nn.Linear(self.flat_dim, z_dim)
-    self.fc_logvar = nn.Linear(self.flat_dim, z_dim)
-    self.fc1 = nn.Linear(z_dim, decoder_hidden)
+    self.fc1 = nn.Linear(flat_dim, 120)
+    self.fc_mu = nn.Linear(120, z_dim)
+    self.fc_logvar = nn.Linear(120, z_dim)
+    self.fc2 = nn.Linear(z_dim, decoder_hidden)
     self.fc_decode = nn.Linear(decoder_hidden, output_shape)
 
+  def _forward_features(self, x: torch.Tensor) -> torch.Tensor:
+    x = self.pool(torch.tanh(self.conv1(x)))
+    x = self.pool(torch.tanh(self.conv2(x)))
+    return torch.flatten(x, 1)
+
   def encode(self, x: torch.Tensor):
-    h = self.encoder(x)
-    h = torch.flatten(h, 1)
+    # both conv layer calls
+    h = torch.tanh(
+      self.fc1(self._forward_features(x))
+    )
     mu = self.fc_mu(h)
     logvar = self.fc_logvar(h)
     logvar = torch.clamp(logvar, min=-10.0, max=2.0)
@@ -55,8 +136,9 @@ class VIBNet(nn.Module):
     return mu + eps * std
 
   def decode(self, x: torch.Tensor):
-    h = torch.relu(self.fc1(x))
-    return self.fc_decode(h)
+    h = torch.tanh(self.fc2(x))
+    logits = self.fc_decode(h)
+    return logits
 
   def forward(self, x: torch.Tensor):
     mu, sigma = self.encode(x)
@@ -64,43 +146,150 @@ class VIBNet(nn.Module):
     logits = self.decode(z)
     return logits, mu, sigma
 
+  @staticmethod
+  def vib_loss(
+    logits: torch.Tensor,
+    y: torch.Tensor,
+    mu: torch.Tensor,
+    sigma: torch.Tensor,
+    beta: float,
+  ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ce = F.cross_entropy(logits, y)
+
+    variance = sigma.pow(2)
+    log_variance = 2 * torch.log(sigma)
+    kl_terms = 0.5 * (variance + mu.pow(2) - 1.0 - log_variance)
+    kl = torch.sum(kl_terms, dim=1).mean()
+
+    total_loss = ce + beta * kl
+    return ce, kl, total_loss
+
+def train_epoch(
+  model: nn.Module,
+  dataloader: DataLoader,
+  optimizer: optim.Optimizer,
+  beta: float,
+) -> Tuple[float, float]:
+  model.train()
+  device = next(model.parameters()).device
+
+  ce_sum, correct, num_examples = 0.0, 0, 0
+
+  for X, Y in (tq := tqdm(dataloader, desc="training", leave=False)):
+    X, Y = X.to(device), Y.to(device)
+    optimizer.zero_grad()
+
+    logits, mu, sigma = model(X)
+    ce, _, loss = VIBNet.vib_loss(logits, Y, mu, sigma, beta)
+
+    loss.backward()
+    optimizer.step()
+
+    batch_size = Y.size(0)
+    ce_sum += ce.item() * batch_size
+    correct += (logits.argmax(dim=1) == Y).sum().item()
+    num_examples += batch_size
+
+  avg_ce_loss = ce_sum / num_examples
+  accuracy = 100.0 * correct / num_examples
+
+  return avg_ce_loss, accuracy
+
+def evaluate_epoch(model: nn.Module, test_dataloader: DataLoader, beta: float) -> Tuple[float, float]:
+  model.eval()
+  device = next(model.parameters()).device
+
+  ce_sum = 0.0
+  correct = 0
+  total = 0
+
+  with torch.inference_mode():
+  #with torch.no_grad():
+    for X, Y in test_dataloader:
+      X, Y = X.to(device), Y.to(device)
+
+      logits, mu, sigma = model(X)
+      ce, _, _ = VIBNet.vib_loss(logits, Y, mu, sigma, beta)
+
+      batch_size = X.size(0)
+      ce_sum += ce.item() * batch_size
+      correct += (logits.argmax(dim=1) == Y).sum().item()
+      total += batch_size
+
+  avg_ce_loss = ce_sum / total
+  accuracy = 100.0 * correct / total
+  return avg_ce_loss, accuracy
+
+def print_epoch(epoch, epochs, beta, train_ce_loss, train_acc, test_ce_loss, test_acc):
+  print(
+    f"""epoch [{epoch + 1}/{epochs}] β({beta}) train ce loss: {train_ce_loss:.3f} | train acc: {train_acc:.2f}%
+  \t\t\ttest ce loss: {test_ce_loss:.3f} | test acc: {test_acc:.2f}%"""
+  )
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser(description="cnn vib training with configurable hyperparameters.")
   parser.add_argument("--beta", type=float, required=True, help="beta coefficient")
-  parser.add_argument("--z_dim", type=int, required=True, default=128, help="latent dimension size")
-  parser.add_argument("--hidden1", type=int, required=True, default=96, help="number of channels in the first conv block")
-  parser.add_argument("--hidden2", type=int, required=True, default=128, help="number of channels in the deeper conv blocks")
-  parser.add_argument("--decoder_hidden", type=int, default=64, help="number of post-ib hidden units")
-  parser.add_argument("--epochs", type=int, required=True, default=150, help="number of training epochs")
-  parser.add_argument("--rnd_seed", type=int, default=42, help="torch manual seed (default: 42)")
+  parser.add_argument("--z_dim", type=int, required=True, help="latent dimension size")
+  parser.add_argument("--hidden1", type=int, default=6, help="number of channels in the first conv layer")
+  parser.add_argument("--hidden2", type=int, default=16, help="number of channels in the second conv layer")
+  parser.add_argument("--decoder_hidden", type=int, default=84, help="number of post-ib hidden units")
   parser.add_argument("--lr", type=float, default=3e-4, help="learning rate")
+  parser.add_argument("--epochs", type=int, default=300, help="number of training epochs")
+  parser.add_argument("--rnd_seed", type=int, default=42, help="torch manual seed (default: 42)")
   parser.add_argument("--batch_size", type=int, default=128, help="batch size")
   parser.add_argument("--data_dir", type=str, default="data/CIFAR-10/", help="dataset path")
   args = parser.parse_args()
+  device = get_device()
+  params = VIBCNNParams.from_args(args, device)
+  print(params)
 
-  mean = (0.4914, 0.4822, 0.4465)
-  std = (0.2023, 0.1994, 0.2010)
+  torch.manual_seed(params.rnd_seed)
+  if torch.cuda.is_available(): torch.cuda.manual_seed(params.rnd_seed)
 
-  train_transform = transforms.Compose(
-    [
-      transforms.ToTensor(),
-      transforms.RandomCrop(32, padding=4),
-      transforms.RandomHorizontalFlip(),
-      transforms.Normalize(mean, std),
-    ]
-  )
+  train_transform = CIFAR10Dataset.train_transform(args.data_dir)
+  test_transform = CIFAR10Dataset.test_transform(args.data_dir)
 
-  test_transform = transforms.Compose(
-    [
-      transforms.ToTensor(),
-      transforms.Normalize(mean, std),
-    ]
-  )
+  num_workers = min(4, os.cpu_count() or 0)
+  pin_memory = params.device.type == "cuda"
+  train_loader_kwargs = { "batch_size": params.batch_size,
+                          "num_workers": num_workers,
+                          "pin_memory": pin_memory }
+  test_loader_kwargs = { "batch_size": params.batch_size * 4,
+                         "num_workers": num_workers,
+                         "pin_memory": pin_memory }
+  if num_workers > 0: train_loader_kwargs["persistent_workers"] = True
 
-  params = VIBNetParams.from_args(args, "cnn")
-  model = VIBNet(params.z_dim, (3, 32, 32), params.hidden1, params.hidden2, args.decoder_hidden, 10)
-  optimizer = optim.Adam(model.parameters(), lr=params.lr)
   train_dataset = CIFAR10Dataset(args.data_dir, train=True, transform=train_transform)
   test_dataset = CIFAR10Dataset(args.data_dir, train=False, transform=test_transform)
-  run_training_job(model, optimizer, params, train_dataset, test_dataset)
+  train_loader = DataLoader(train_dataset, shuffle=True, **train_loader_kwargs)
+  test_loader = DataLoader(test_dataset, shuffle=False, **test_loader_kwargs)
+
+  model = VIBNet(params.z_dim, (3, 32, 32), params.hidden1, params.hidden2, params.decoder_hidden, 10).to(device)
+  print(f"# of model parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad)}")
+  optimizer = optim.Adam(model.parameters(), lr=params.lr, betas=(0.5, 0.999))
+
+  train_ce_losses, train_accs, test_ce_losses, test_accs = [], [], [], []
+
+  for epoch in range(args.epochs):
+    train_ce_loss, train_acc = train_epoch(model, train_loader, optimizer, beta=args.beta)
+
+    if epoch % 10 == 0 and epoch != args.epochs - 1:
+      test_ce_loss, test_acc = evaluate_epoch(model, test_loader, beta=args.beta)
+
+      print_epoch(epoch, args.epochs, args.beta, train_ce_loss, train_acc, test_ce_loss, test_acc)
+
+      train_ce_losses.append(train_ce_loss); train_accs.append(train_acc)
+      test_ce_losses.append(test_ce_loss); test_accs.append(test_acc)
+
+  torch.save(model.state_dict(), f"{params.save_dir()}.pth")
+
+  final_test_ce_loss, final_test_acc = evaluate_epoch(model, test_loader, beta=args.beta)
+  test_ce_losses.append(final_test_ce_loss)
+  test_accs.append(final_test_acc)
+
+  with open(f"{params.save_dir()}_stats.json", "w") as json_file:
+    json.dump(
+      params.to_json(train_ce_losses, train_accs, test_ce_losses, test_accs),
+      json_file,
+      indent=2,
+    )

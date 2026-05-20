@@ -14,10 +14,21 @@ output_shape = 10
 batch_size = 128
 
 # pruning experiment config
-layers_to_prune = ["fc_mu", "fc_logvar", "fc2"]
-#layers_to_prune = ["fc1"]
-layers_to_prune_fc2_only = ["fc2"]
-prune_layer_sets = [layers_to_prune, layers_to_prune_fc2_only]
+default_prune_layer_sets = [["fc_mu", "fc_logvar", "fc2"], ["fc2"]]
+prune_method_aliases = {
+  "weight": "weight",
+  "incoming": "incoming",
+  "in-coming": "incoming",
+  "outgoing": "outgoing",
+  "out-going": "outgoing",
+}
+outgoing_layer_map = {
+  "fc1": ["fc_mu", "fc_logvar"],
+  "fc_mu": ["fc2"],
+  "fc_logvar": ["fc2"],
+  "fc2": ["fc_decode"],
+  "fc_decode": [],
+}
 prune_percents = [0.0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7]
 
 @dataclass(frozen=True)
@@ -32,80 +43,125 @@ class RunSpec:
   epochs: int
   seed: int
 
-# TODO: change from row/col to pruning based on incoming and outgoing weights
-#   like talked about
+def parse_layer_sets_arg(raw: str) -> list[list[str]]:
+  try:
+    layer_sets = json.loads(raw)
+  except json.JSONDecodeError as exc:
+    raise argparse.ArgumentTypeError(f"invalid JSON for --layer_sets: {exc}") from exc
 
-def indices_above_avg_abs_threshold(
-  model: nn.Module,
-  layer_name: str,
-  count: int,
-  axis: str = "row",
-  largest: bool = True,
-) -> dict[int, float]:
-  layer = dict(model.named_modules())[layer_name]
+  if not isinstance(layer_sets, list):
+    raise argparse.ArgumentTypeError("--layer_sets must be a JSON list of layer lists")
+
+  for layer_group in layer_sets:
+    if not isinstance(layer_group, list) or any(not isinstance(layer_name, str) for layer_name in layer_group):
+      raise argparse.ArgumentTypeError("--layer_sets must be a JSON list of string lists")
+
+  return layer_sets
+
+def format_layer_set(layer_names: list[str]) -> str:
+  return json.dumps(layer_names)
+
+def parse_prune_method_arg(raw: str) -> str:
+  prune_method = prune_method_aliases.get(raw)
+  if prune_method is None:
+    valid_methods = ", ".join(sorted(prune_method_aliases))
+    raise argparse.ArgumentTypeError(f"invalid prune method: {raw}. expected one of: {valid_methods}")
+  return prune_method
+
+def get_linear_layer(model: nn.Module, layer_name: str) -> nn.Linear:
+  layer = dict(model.named_modules()).get(layer_name)
+  if layer is None:
+    raise ValueError(f"layer not found in model: {layer_name}")
   if not isinstance(layer, nn.Linear):
     raise ValueError(f"layer is not nn.Linear: {layer_name}")
-  weights = layer.weight.detach()
-  avg_abs_by_idx = []
-  if axis == "row":
-    for row_idx in range(weights.shape[0]):
-      avg_abs_weight = weights[row_idx, :].abs().mean().item()
-      avg_abs_by_idx.append((row_idx, avg_abs_weight))
-  elif axis == "col":
-    for col_idx in range(weights.shape[1]):
-      avg_abs_weight = weights[:, col_idx].abs().mean().item()
-      avg_abs_by_idx.append((col_idx, avg_abs_weight))
-  else:
-    raise ValueError("axis must be 'row' or 'col'")
-  avg_abs_by_idx.sort(key=lambda x: x[1], reverse=largest)
-  selected_pairs = avg_abs_by_idx[:count]
-  return {idx: avg for idx, avg in selected_pairs}
+  return layer
 
-def inspect_top_neurons(
-  model: nn.Module,
-  layer_names: list[str],
-  count: int | dict[str, int],
-  axis: str = "row",
-  largest: bool = True,
-) -> dict[str, list[int]]:
-  top_neurons = {}
-  for layer_name in layer_names:
-    layer_count = count[layer_name] if isinstance(count, dict) else count
-    indices = indices_above_avg_abs_threshold(model, layer_name, layer_count, axis=axis, largest=largest)
-    top_neurons[layer_name] = list(indices.keys())
-  return top_neurons
+def lowest_score_indices(scores: torch.Tensor, amount: float) -> torch.Tensor:
+  prune_count = int(round(amount * scores.numel()))
+  prune_count = max(0, min(scores.numel(), prune_count))
+  if prune_count == 0:
+    return torch.empty(0, dtype=torch.long, device=scores.device)
+  return torch.topk(scores, k=prune_count, largest=False).indices
 
-def neuron_prune_layers(model: nn.Module, layer_names: list[str], amount: float, axis: str = "row") -> None:
+def weight_prune_layers(model: nn.Module, layer_names: list[str], amount: float) -> None:
   if amount <= 0:
     return
-  if axis not in {"row", "col"}:
-    raise ValueError("axis must be 'row' or 'col'")
-  modules = dict(model.named_modules())
-  prune_counts = {}
+
   for layer_name in layer_names:
-    module = modules.get(layer_name)
-    if module is None:
-      raise ValueError(f"layer not found in model: {layer_name}")
-    if not isinstance(module, nn.Linear):
-      raise ValueError(f"layer is not nn.Linear: {layer_name}")
-    axis_count = module.weight.shape[0] if axis == "row" else module.weight.shape[1]
-    prune_count = int(round(amount * axis_count))
-    prune_counts[layer_name] = max(0, min(axis_count, prune_count))
+    module = get_linear_layer(model, layer_name)
 
-  indices_to_prune = inspect_top_neurons(model, layer_names, prune_counts, axis=axis, largest=False)
-
-  for layer_name, prune_indices in indices_to_prune.items():
-    if not prune_indices:
+    weight_count = module.weight.numel()
+    prune_count = int(round(amount * weight_count))
+    prune_count = max(0, min(weight_count, prune_count))
+    if prune_count == 0:
       continue
-    module = modules[layer_name]
+
     with torch.no_grad():
-      prune_idx = torch.tensor(prune_indices, device=module.weight.device)
-      if axis == "row":
-        module.weight[prune_idx, :] = 0
-        if module.bias is not None:
-          module.bias[prune_idx] = 0
-      else:
-        module.weight[:, prune_idx] = 0
+      flat_abs = module.weight.detach().abs().reshape(-1)
+      prune_idx = torch.topk(flat_abs, k=prune_count, largest=False).indices
+      flat_weight = module.weight.reshape(-1)
+      flat_weight[prune_idx] = 0
+
+def incoming_prune_layers(model: nn.Module, layer_names: list[str], amount: float) -> None:
+  if amount <= 0:
+    return
+
+  for layer_name in layer_names:
+    module = get_linear_layer(model, layer_name)
+    scores = module.weight.detach().abs().mean(dim=1)
+    prune_idx = lowest_score_indices(scores, amount)
+    if prune_idx.numel() == 0:
+      continue
+
+    with torch.no_grad():
+      module.weight[prune_idx, :] = 0
+      if module.bias is not None:
+        module.bias[prune_idx] = 0
+
+def outgoing_prune_layers(model: nn.Module, layer_names: list[str], amount: float) -> None:
+  if amount <= 0:
+    return
+
+  for layer_name in layer_names:
+    module = get_linear_layer(model, layer_name)
+    next_layer_names = outgoing_layer_map.get(layer_name)
+    if next_layer_names is None:
+      raise ValueError(f"no outgoing layer mapping configured for: {layer_name}")
+    if not next_layer_names:
+      raise ValueError(f"layer has no outgoing linear layer to prune against: {layer_name}")
+
+    outgoing_weights = []
+    next_layers = []
+    for next_layer_name in next_layer_names:
+      next_layer = get_linear_layer(model, next_layer_name)
+      if next_layer.weight.shape[1] != module.weight.shape[0]:
+        raise ValueError(
+          f"shape mismatch between {layer_name} outputs and {next_layer_name} inputs: "
+          f"{module.weight.shape[0]} != {next_layer.weight.shape[1]}"
+        )
+      next_layers.append(next_layer)
+      outgoing_weights.append(next_layer.weight.detach().abs().transpose(0, 1))
+
+    scores = torch.cat(outgoing_weights, dim=1).mean(dim=1)
+    prune_idx = lowest_score_indices(scores, amount)
+    if prune_idx.numel() == 0:
+      continue
+
+    with torch.no_grad():
+      for next_layer in next_layers:
+        next_layer.weight[:, prune_idx] = 0
+
+def prune_layers(model: nn.Module, layer_names: list[str], amount: float, prune_method: str) -> None:
+  if prune_method == "weight":
+    weight_prune_layers(model, layer_names, amount)
+    return
+  if prune_method == "incoming":
+    incoming_prune_layers(model, layer_names, amount)
+    return
+  if prune_method == "outgoing":
+    outgoing_prune_layers(model, layer_names, amount)
+    return
+  raise ValueError(f"unknown prune method: {prune_method}")
 
 def parse_all_run_specs(root_dir: str) -> list[RunSpec]:
   pattern = re.compile(r"^vib_mlp_(\d+)_(\d+)_(\d+)_([0-9.eE+-]+)_([0-9.eE+-]+)_(\d+)_(\d+)$")
@@ -158,7 +214,7 @@ def group_runs_by_config(runs: list[RunSpec]) -> list[tuple[tuple[int, int, int,
 def evaluate_pruning_curve(
   run: RunSpec,
   layer_names: list[str],
-  prune_axis: str,
+  prune_method: str,
   test_loader: DataLoader,
   device: torch.device,
 ) -> dict[str, object]:
@@ -170,7 +226,7 @@ def evaluate_pruning_curve(
     model = VIBMLP(run.z_dim, input_shape, run.hidden1, run.hidden2, output_shape).to(device)
     model.load_state_dict(state_dict)
 
-    neuron_prune_layers(model, layer_names, prune_percent, axis=prune_axis)
+    prune_layers(model, layer_names, prune_percent, prune_method)
     loss, acc = evaluate_epoch(model, test_loader, beta=run.beta)
 
     losses.append(float(loss))
@@ -186,7 +242,7 @@ def evaluate_pruning_curve(
     "accuracies": accs,
   }
 
-def build_report(save_root: str, prune_axis: str) -> dict[str, object]:
+def build_report(save_root: str, prune_method: str, layer_sets: list[list[str]]) -> dict[str, object]:
   runs = parse_all_run_specs(save_root)
   if not runs:
     raise RuntimeError(f"no vib_mlp_* runs found in {save_root}")
@@ -208,11 +264,11 @@ def build_report(save_root: str, prune_axis: str) -> dict[str, object]:
     )
 
     layer_results = []
-    for layer_names in prune_layer_sets:
-      print(f"  layers={', '.join(layer_names)}")
+    for layer_names in layer_sets:
+      print(f"  layers={format_layer_set(layer_names)}")
       curves = []
       for run in config_runs:
-        curves.append(evaluate_pruning_curve(run, layer_names, prune_axis, test_loader, device))
+        curves.append(evaluate_pruning_curve(run, layer_names, prune_method, test_loader, device))
       layer_results.append({"layer_names": layer_names, "curves": curves})
 
     configs.append(
@@ -229,9 +285,9 @@ def build_report(save_root: str, prune_axis: str) -> dict[str, object]:
 
   return {
     "save_root": os.path.abspath(save_root),
-    "prune_axis": prune_axis,
+    "prune_method": prune_method,
     "prune_percents": prune_percents,
-    "layer_sets": prune_layer_sets,
+    "layer_sets": layer_sets,
     "generated_at": datetime.now(timezone.utc).isoformat(),
     "config_count": len(configs),
     "run_count": len(runs),
@@ -241,16 +297,26 @@ def build_report(save_root: str, prune_axis: str) -> dict[str, object]:
 def parse_args() -> argparse.Namespace:
   parser = argparse.ArgumentParser(description="inspect mlp pruning stability across an entire save root")
   parser.add_argument("--save_root", type=str, required=True, help="directory containing saved model runs")
-  parser.add_argument("--prune_axis", choices=["row", "col"], default="row", help="prune ranked weight rows or columns")
+  parser.add_argument(
+    "--prune_method",
+    type=parse_prune_method_arg,
+    default="weight",
+    help="pruning strategy to apply to each target layer: weight, incoming, outgoing",
+  )
+  parser.add_argument(
+    "--layer_sets",
+    type=parse_layer_sets_arg,
+    default=default_prune_layer_sets,
+    help='JSON nested list of layers to prune, e.g. [["fc_mu", "fc_logvar", "fc2"], ["fc2"]]',
+  )
   return parser.parse_args()
 
 if __name__ == "__main__":
   args = parse_args()
   if not os.path.isdir(args.save_root):
     raise RuntimeError(f"save_root does not exist or is not a directory: {args.save_root}")
-  report = build_report(args.save_root, args.prune_axis)
+  report = build_report(args.save_root, args.prune_method, args.layer_sets)
 
-  json_path = os.path.join(args.save_root, f"mlp_pruning_report_{args.prune_axis}.json")
-  #json_path = output_json_path(args.save_root, args.prune_axis)
+  json_path = os.path.join(args.save_root, f"mlp_pruning_report_{args.prune_method}.json")
   with open(json_path, "w", encoding="utf-8") as f: json.dump(report, f, indent=2)
   print(f"\njson saved to: {json_path}")
