@@ -125,7 +125,6 @@ python3 src/cnn/plot_cnn_pruning_robustness.py \
 - CIFAR-10
 - Random seeds: [2136623168, 3824702233, 416282721, 3991408081]
 - Betas=(0.1 0.05 0.01 0.005 0.001 0.0005 0.0001 0.00005 0.0)
-      - OLD: Betas=(0.2 0.15 0.1 0.05 0.01 0.005 0.001 0.0001 0.0)
 - Epochs: 300
 - Learning rate: 2e-4
 
