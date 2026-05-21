@@ -17,7 +17,9 @@ script_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 
 source "$script_dir/.venv/bin/activate"
 
-betas=(0.2 0.15 0.1 0.05 0.01 0.005 0.001 0.0001 0.0)
+#betas=(0.2 0.15 0.1 0.05 0.01 0.005 0.001        0.0001         0.0)
+         #betas=(0.1 0.05 0.01 0.005 0.001 0.0005 0.0001 0.00005 0.0)
+betas=(0.0005 0.00005)
 
 for beta in "${betas[@]}"; do
   python3 "$script_dir/src/cnn/cnn_ib.py" \

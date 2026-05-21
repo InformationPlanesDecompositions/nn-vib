@@ -16,9 +16,6 @@ beta_zero = 0.0
 metric_choices = ["loss", "acc"]
 
 
-def safe_float_str(value: float) -> str: return format(value, "g").replace("-", "m").replace(".", "p")
-
-
 def layer_key(layer_names: list[str]) -> str: return "_".join(layer_names)
 
 
@@ -26,6 +23,7 @@ def model_config_key(config: dict[str, object]) -> tuple[object, ...]:
   return (
     config["hidden1"],
     config["hidden2"],
+    config["decoder_hidden"],
     config["z_dim"],
     config["lr"],
     config["epochs"],
@@ -33,8 +31,11 @@ def model_config_key(config: dict[str, object]) -> tuple[object, ...]:
 
 
 def model_config_label(config_key: tuple[object, ...]) -> str:
-  hidden1, hidden2, z_dim, lr, epochs = config_key
-  return f"h1={hidden1} h2={hidden2} z={z_dim}\nlr={float(lr):g} epochs={epochs}"
+  hidden1, hidden2, decoder_hidden, z_dim, lr, epochs = config_key
+  return (
+    f"h1={hidden1} h2={hidden2} dec={decoder_hidden} z={z_dim}\n"
+    f"lr={float(lr):g} epochs={epochs}"
+  )
 
 
 def loss_robustness_curve(reference_values: list[float], values: list[float]) -> np.ndarray:
@@ -153,12 +154,12 @@ def plot_page(
     ax.axis("off")
 
   fig.suptitle(
-    f"MLP pruning | method={prune_method} | pruned: {', '.join(method_key)} | page {page_index}/{page_count} | {metric}",
+    f"CNN pruning | method={prune_method} | pruned: {', '.join(method_key)} | page {page_index}/{page_count} | {metric}",
     fontsize=16,
   )
 
   page_suffix = "" if page_count == 1 else f"_part_{page_index}"
-  save_name = f"mlp_pruning_{prune_method}_{layer_key(list(method_key))}{page_suffix}_{metric}.png"
+  save_name = f"cnn_pruning_{prune_method}_{layer_key(list(method_key))}{page_suffix}_{metric}.png"
   save_path = os.path.join(output_dir, save_name)
   fig.savefig(save_path, dpi=250, bbox_inches="tight")
   plt.close(fig)
@@ -166,8 +167,8 @@ def plot_page(
 
 
 def parse_args() -> argparse.Namespace:
-  parser = argparse.ArgumentParser(description="plot aggregated mlp pruning robustness from a json report")
-  parser.add_argument("--input_json", type=str, required=True, help="json report produced by inspect_mlp_ib.py")
+  parser = argparse.ArgumentParser(description="plot aggregated cnn pruning robustness from a json report")
+  parser.add_argument("--input_json", type=str, required=True, help="json report produced by inspect_cnn_ib.py")
   parser.add_argument("--plots_dir", type=str, default=default_plots_dir, help="directory to save plots into")
   parser.add_argument("--metric", choices=metric_choices, default="loss", help="plot robustness from losses or accuracies")
   return parser.parse_args()
