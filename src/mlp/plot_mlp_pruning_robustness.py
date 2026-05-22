@@ -72,6 +72,17 @@ def filtered_beta_items(beta_samples: dict[float, list[np.ndarray]]) -> list[tup
   return [(beta, beta_samples[beta]) for beta in sorted(beta_samples)]
 
 
+def aggregate_beta_samples(
+  config_items: list[tuple[tuple[object, ...], dict[float, list[np.ndarray]]]],
+) -> dict[float, list[np.ndarray]]:
+  aggregate_samples: dict[float, list[np.ndarray]] = defaultdict(list)
+  for _, beta_samples in config_items:
+    for beta, curves in beta_samples.items():
+      config_mean, _ = summarize_curves(curves)
+      aggregate_samples[beta].append(config_mean)
+  return aggregate_samples
+
+
 def build_samples(
   report: dict[str, object],
   metric: str,
@@ -165,6 +176,41 @@ def plot_page(
   return save_path
 
 
+def plot_aggregate_page(
+  method_key: tuple[str, ...],
+  config_items: list[tuple[tuple[object, ...], dict[float, list[np.ndarray]]]],
+  prune_percents: list[float],
+  prune_method: str,
+  metric: str,
+  output_dir: str,
+) -> str:
+  fig, ax = plt.subplots(figsize=(10, 6), constrained_layout=True)
+  xs = np.asarray(prune_percents, dtype=np.float64) * 100.0
+  aggregate_samples = aggregate_beta_samples(config_items)
+
+  for beta, curves in filtered_beta_items(aggregate_samples):
+    mean, stderr = summarize_curves(curves)
+    ax.plot(xs, mean, marker="o", linewidth=2.0, label=f"beta={beta:g}")
+    ax.fill_between(xs, mean - stderr, mean + stderr, alpha=0.2)
+
+  ax.set_xlabel("pruning percentage")
+  ax.set_ylabel(metric_ylabel(metric))
+  ax.set_title(f"Average over model sizes | pruned: {', '.join(method_key)}")
+  ax.grid(True, alpha=0.3)
+  ax.legend(fontsize=9)
+
+  fig.suptitle(
+    f"MLP pruning aggregate | method={prune_method} | {metric}",
+    fontsize=16,
+  )
+
+  save_name = f"mlp_pruning_{prune_method}_{layer_key(list(method_key))}_aggregate_{metric}.png"
+  save_path = os.path.join(output_dir, save_name)
+  fig.savefig(save_path, dpi=250, bbox_inches="tight")
+  plt.close(fig)
+  return save_path
+
+
 def parse_args() -> argparse.Namespace:
   parser = argparse.ArgumentParser(description="plot aggregated mlp pruning robustness from a json report")
   parser.add_argument("--input_json", type=str, required=True, help="json report produced by inspect_mlp_ib.py")
@@ -186,6 +232,15 @@ if __name__ == "__main__":
 
   for method_key in sorted(panel_samples):
     sorted_config_items = sorted(panel_samples[method_key].items(), key=lambda item: item[0])
+    aggregate_path = plot_aggregate_page(
+      method_key,
+      sorted_config_items,
+      prune_percent_map[method_key],
+      prune_method,
+      args.metric,
+      plots_dir,
+    )
+    print(f"saved figure: {aggregate_path}")
     page_size = 6
     page_count = math.ceil(len(sorted_config_items) / page_size)
     for page_idx in range(page_count):
