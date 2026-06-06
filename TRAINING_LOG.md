@@ -1,36 +1,14 @@
 # Training Log
 ```bash
-python3 src/mlp/inspect_mlp_ib.py \
-  --save_root ../bachelor-arbeit/Results/mlp_final_save_stats_weights \
-  --prune_method incoming \
-  --layer_sets '[["fc_mu", "fc_logvar", "fc2"], ["fc2"]]'
-
-python3 src/mlp/inspect_mlp_ib.py \
-  --save_root ../bachelor-arbeit/Results/mlp_final_save_stats_weights \
-  --prune_method outgoing \
-  --layer_sets '[["fc_mu", "fc_logvar", "fc2"], ["fc2"]]'
-
-python3 src/mlp/inspect_mlp_ib.py \
-  --save_root ../bachelor-arbeit/Results/mlp_final_save_stats_weights \
-  --prune_method weight \
-  --layer_sets '[["fc_mu", "fc_logvar", "fc2"], ["fc2"]]'
+python3 src/mlp/inspect_mlp_ib.py --save_root ~/Downloads/mlp_save_stats_weights --prune_method incoming --layer_sets '[["fc_mu", "fc_logvar", "fc2"], ["fc2"]]'
+python3 src/mlp/inspect_mlp_ib.py --save_root ~/Downloads/mlp_save_stats_weights --prune_method outgoing --layer_sets '[["fc_mu", "fc_logvar", "fc2"], ["fc2"]]'
+python3 src/mlp/inspect_mlp_ib.py --save_root ~/Downloads/mlp_save_stats_weights --prune_method weight --layer_sets '[["fc_mu", "fc_logvar", "fc2"], ["fc2"]]'
 ```
 
 ```bash
-python3 src/mlp/plot_mlp_pruning_robustness.py \
-  --input_json plots/inspect-saves/mlp_pruning_report_incoming.json \
-  --plots_dir plots/ \
-  --metric acc
-
-python3 src/mlp/plot_mlp_pruning_robustness.py \
-  --input_json plots/inspect-saves/mlp_pruning_report_outgoing.json \
-  --plots_dir plots/ \
-  --metric acc
-
-python3 src/mlp/plot_mlp_pruning_robustness.py \
-  --input_json plots/inspect-saves/mlp_pruning_report_weight.json \
-  --plots_dir plots/ \
-  --metric acc
+python3 src/mlp/plot_mlp_pruning_robustness.py --input_json plots/inspect-saves/mlp_pruning_report_incoming.json --plots_dir plots/ --metric acc
+python3 src/mlp/plot_mlp_pruning_robustness.py --input_json plots/inspect-saves/mlp_pruning_report_outgoing.json --plots_dir plots/ --metric acc
+python3 src/mlp/plot_mlp_pruning_robustness.py --input_json plots/inspect-saves/mlp_pruning_report_weight.json --plots_dir plots/ --metric acc
 ```
 
 ## MLP IB
@@ -88,37 +66,15 @@ python3 src/mlp/plot_mlp_pruning_robustness.py \
 ---
 
 ```
-python3 src/cnn/inspect_cnn_ib.py \
-  --save_root ../bachelor-arbeit/Results/cnn_save_stats_weights \
-  --prune_method incoming \
-  --layer_sets '[["fc_mu", "fc_logvar", "fc2"], ["fc2"]]'
-
-python3 src/cnn/inspect_cnn_ib.py \
-  --save_root ../bachelor-arbeit/Results/cnn_save_stats_weights \
-  --prune_method outgoing \
-  --layer_sets '[["fc_mu", "fc_logvar", "fc2"], ["fc2"]]'
-
-python3 src/cnn/inspect_cnn_ib.py \
-  --save_root ../bachelor-arbeit/Results/cnn_save_stats_weights \
-  --prune_method weight \
-  --layer_sets '[["fc_mu", "fc_logvar", "fc2"], ["fc2"]]'
+python3 src/cnn/inspect_cnn_ib.py --save_root ~/Downloads/cnn_save_stats_weights --prune_method incoming --layer_sets '[["fc_mu", "fc_logvar", "fc2"], ["fc2"]]'
+python3 src/cnn/inspect_cnn_ib.py --save_root ~/Downloads/cnn_save_stats_weights --prune_method outgoing --layer_sets '[["fc_mu", "fc_logvar", "fc2"], ["fc2"]]'
+python3 src/cnn/inspect_cnn_ib.py --save_root ~/Downloads/cnn_save_stats_weights --prune_method weight --layer_sets '[["fc_mu", "fc_logvar", "fc2"], ["fc2"]]'
 ```
 
 ```
-python3 src/cnn/plot_cnn_pruning_robustness.py \
-  --input_json plots/inspect-saves/cnn_pruning_report_incoming.json \
-  --plots_dir plots/ \
-  --metric acc
-
-python3 src/cnn/plot_cnn_pruning_robustness.py \
-  --input_json plots/inspect-saves/cnn_pruning_report_outgoing.json \
-  --plots_dir plots/ \
-  --metric acc
-
-python3 src/cnn/plot_cnn_pruning_robustness.py \
-  --input_json plots/inspect-saves/cnn_pruning_report_weight.json \
-  --plots_dir plots/ \
-  --metric acc
+python3 src/cnn/plot_cnn_pruning_robustness.py --input_json plots/inspect-saves/cnn_pruning_report_incoming.json --plots_dir plots/ --metric acc
+python3 src/cnn/plot_cnn_pruning_robustness.py --input_json plots/inspect-saves/cnn_pruning_report_outgoing.json --plots_dir plots/ --metric acc
+python3 src/cnn/plot_cnn_pruning_robustness.py --input_json plots/inspect-saves/cnn_pruning_report_weight.json --plots_dir plots/ --metric acc
 ```
 
 ## CNN IB
@@ -126,7 +82,7 @@ python3 src/cnn/plot_cnn_pruning_robustness.py \
 - Random seeds: [2136623168, 3824702233, 416282721, 3991408081]
 - Betas=(0.1 0.05 0.01 0.005 0.001 0.0005 0.0001 0.00005 0.0)
 - Epochs: 300
-- Learning rate: 2e-4
+- Learning rate: 3e-4
 
 ### 2136623168
 #### Trained 1

@@ -1,9 +1,9 @@
 #!/bin/sh
 
-dest="conqueror-home:dev/nn-vib"
+dest="conqueror:dev/nn-vib"
 
 if [ "$1" = "--away" ]; then
-  dest="ln@conqueror.lneural.net:dev/nn-vib"
+  dest="ln@conqueror-away:dev/nn-vib"
 elif [ -n "$1" ]; then
   echo "usage: $0 [--away]"
   exit 1
