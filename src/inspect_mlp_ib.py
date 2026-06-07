@@ -14,19 +14,12 @@ output_shape = 10
 batch_size = 128
 
 # pruning experiment config
-default_prune_layer_sets = [["fc_mu_logvar", "fc2"], ["fc2"]]
-prune_method_aliases = {
-  "weight": "weight",
-  "incoming": "incoming",
-  "in-coming": "incoming",
-  "outgoing": "outgoing",
-  "out-going": "outgoing",
-}
+prune_layer_sets = [["fc_mu_logvar", "fc2"], ["fc2"], ["fc2", "fc_decode"]]
+prune_methods = ["incoming", "outgoing", "weight"]
 outgoing_layer_map = {
-  "fc1": ["fc_mu_logvar"],
-  "fc_mu_logvar": ["fc2"],
-  "fc2": ["fc_decode"],
-  "fc_decode": [],
+  "fc_mu_logvar": "fc2",
+  "fc2": "fc_decode",
+  "fc_decode": None,
 }
 prune_percents = [
   0.0, 0.05, 0.1,
@@ -34,6 +27,7 @@ prune_percents = [
   0.3, 0.35, 0.4,
   0.45, 0.5, 0.55,
   0.6, 0.65, 0.7,
+  0.75, 0.8,
 ]
 
 @dataclass(frozen=True)
@@ -48,30 +42,8 @@ class RunSpec:
   epochs: int
   seed: int
 
-def parse_layer_sets_arg(raw: str) -> list[list[str]]:
-  try:
-    layer_sets = json.loads(raw)
-  except json.JSONDecodeError as exc:
-    raise argparse.ArgumentTypeError(f"invalid JSON for --layer_sets: {exc}") from exc
-
-  if not isinstance(layer_sets, list):
-    raise argparse.ArgumentTypeError("--layer_sets must be a JSON list of layer lists")
-
-  for layer_group in layer_sets:
-    if not isinstance(layer_group, list) or any(not isinstance(layer_name, str) for layer_name in layer_group):
-      raise argparse.ArgumentTypeError("--layer_sets must be a JSON list of string lists")
-
-  return layer_sets
-
 def format_layer_set(layer_names: list[str]) -> str:
   return json.dumps(layer_names)
-
-def parse_prune_method_arg(raw: str) -> str:
-  prune_method = prune_method_aliases.get(raw)
-  if prune_method is None:
-    valid_methods = ", ".join(sorted(prune_method_aliases))
-    raise argparse.ArgumentTypeError(f"invalid prune method: {raw}. expected one of: {valid_methods}")
-  return prune_method
 
 def get_linear_layer(model: nn.Module, layer_name: str) -> nn.Linear:
   layer = dict(model.named_modules()).get(layer_name)
@@ -129,36 +101,29 @@ def outgoing_prune_layers(model: nn.Module, layer_names: list[str], amount: floa
 
   for layer_name in layer_names:
     module = get_linear_layer(model, layer_name)
-    next_layer_names = outgoing_layer_map.get(layer_name)
-    if next_layer_names is None:
+    next_layer_name = outgoing_layer_map.get(layer_name)
+    if layer_name not in outgoing_layer_map:
       raise ValueError(f"no outgoing layer mapping configured for: {layer_name}")
-    if not next_layer_names:
+    if next_layer_name is None:
       raise ValueError(f"layer has no outgoing linear layer to prune against: {layer_name}")
 
-    outgoing_weights = []
-    next_layers = []
-    for next_layer_name in next_layer_names:
-      next_layer = get_linear_layer(model, next_layer_name)
-      if layer_name == "fc_mu_logvar" and next_layer_name == "fc2":
-        next_layers.append(next_layer)
-        outgoing_weights.append(next_layer.weight.detach().abs().transpose(0, 1))
-        continue
+    next_layer = get_linear_layer(model, next_layer_name)
+    if layer_name == "fc_mu_logvar":
+      scores = next_layer.weight.detach().abs().mean(dim=0)
+    else:
       if next_layer.weight.shape[1] != module.weight.shape[0]:
         raise ValueError(
           f"shape mismatch between {layer_name} outputs and {next_layer_name} inputs: "
           f"{module.weight.shape[0]} != {next_layer.weight.shape[1]}"
         )
-      next_layers.append(next_layer)
-      outgoing_weights.append(next_layer.weight.detach().abs().transpose(0, 1))
+      scores = next_layer.weight.detach().abs().mean(dim=0)
 
-    scores = torch.cat(outgoing_weights, dim=1).mean(dim=1)
     prune_idx = lowest_score_indices(scores, amount)
     if prune_idx.numel() == 0:
       continue
 
     with torch.no_grad():
-      for next_layer in next_layers:
-        next_layer.weight[:, prune_idx] = 0
+      next_layer.weight[:, prune_idx] = 0
 
 def prune_layers(model: nn.Module, layer_names: list[str], amount: float, prune_method: str) -> None:
   if prune_method == "weight":
@@ -251,7 +216,7 @@ def evaluate_pruning_curve(
     "accuracies": accs,
   }
 
-def build_report(save_root: str, prune_method: str, layer_sets: list[list[str]]) -> dict[str, object]:
+def build_report(save_root: str, prune_method: str) -> dict[str, object]:
   runs = parse_all_run_specs(save_root)
   if not runs:
     raise RuntimeError(f"no vib_mlp_* runs found in {save_root}")
@@ -273,7 +238,7 @@ def build_report(save_root: str, prune_method: str, layer_sets: list[list[str]])
     )
 
     layer_results = []
-    for layer_names in layer_sets:
+    for layer_names in prune_layer_sets:
       print(f"  layers={format_layer_set(layer_names)}")
       curves = []
       for run in config_runs:
@@ -296,7 +261,7 @@ def build_report(save_root: str, prune_method: str, layer_sets: list[list[str]])
     "save_root": os.path.abspath(save_root),
     "prune_method": prune_method,
     "prune_percents": prune_percents,
-    "layer_sets": layer_sets,
+    "layer_sets": prune_layer_sets,
     "generated_at": datetime.now(timezone.utc).isoformat(),
     "config_count": len(configs),
     "run_count": len(runs),
@@ -306,26 +271,16 @@ def build_report(save_root: str, prune_method: str, layer_sets: list[list[str]])
 def parse_args() -> argparse.Namespace:
   parser = argparse.ArgumentParser(description="inspect mlp pruning stability across an entire save root")
   parser.add_argument("--save_root", type=str, required=True, help="directory containing saved model runs")
-  parser.add_argument(
-    "--prune_method",
-    type=parse_prune_method_arg,
-    default="weight",
-    help="pruning strategy to apply to each target layer: weight, incoming, outgoing",
-  )
-  parser.add_argument(
-    "--layer_sets",
-    type=parse_layer_sets_arg,
-    default=default_prune_layer_sets,
-    help='JSON nested list of layers to prune, e.g. [["fc_mu_logvar", "fc2"], ["fc2"]]',
-  )
   return parser.parse_args()
 
 if __name__ == "__main__":
   args = parse_args()
   if not os.path.isdir(args.save_root):
     raise RuntimeError(f"save_root does not exist or is not a directory: {args.save_root}")
-  report = build_report(args.save_root, args.prune_method, args.layer_sets)
 
-  json_path = os.path.join(args.save_root, f"mlp_pruning_report_{args.prune_method}.json")
-  with open(json_path, "w", encoding="utf-8") as f: json.dump(report, f, indent=2)
-  print(f"\njson saved to: {json_path}")
+  for prune_method in prune_methods:
+    print(f"\nprune_method={prune_method}")
+    report = build_report(args.save_root, prune_method)
+    json_path = os.path.join(args.save_root, f"mlp_pruning_report_{prune_method}.json")
+    with open(json_path, "w", encoding="utf-8") as f: json.dump(report, f, indent=2)
+    print(f"\njson saved to: {json_path}")

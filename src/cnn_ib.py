@@ -13,8 +13,6 @@ parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, parent_dir)
 from msc import get_device, CIFAR10Dataset
 
-# GOAL: 70-76% test acc -> 0.8-1.3 CE Test Loss
-
 def seed_everything(seed: int) -> None:
   random.seed(seed)
   np.random.seed(seed % (2**32))

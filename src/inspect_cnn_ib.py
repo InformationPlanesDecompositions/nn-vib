@@ -14,28 +14,20 @@ output_shape = 10
 batch_size = 512
 
 # pruning experiment config
-default_prune_layer_sets = [["fc_mu_logvar", "fc2"], ["fc2"]]
-prune_method_aliases = {
-  "weight": "weight",
-  "incoming": "incoming",
-  "in-coming": "incoming",
-  "outgoing": "outgoing",
-  "out-going": "outgoing",
-}
+prune_layer_sets = [["fc_mu_logvar", "fc2"], ["fc2"], ["fc2", "fc_decode"]]
+prune_methods = ["incoming", "outgoing", "weight"]
 outgoing_layer_map = {
-  "conv1": [("conv2", "conv")],
-  "conv2": [("fc1", "conv_flatten_linear")],
-  "fc1": [("fc_mu_logvar", "linear")],
-  "fc_mu_logvar": [("fc2", "latent_linear")],
-  "fc2": [("fc_decode", "linear")],
-  "fc_decode": [],
+  "fc_mu_logvar": ("fc2", "latent_linear"),
+  "fc2": ("fc_decode", "linear"),
+  "fc_decode": None,
 }
 prune_percents = [
   0.0, 0.05, 0.1,
   0.15, 0.2, 0.25,
   0.3, 0.35, 0.4,
   0.45, 0.5, 0.55,
-  0.6, 0.65, 0.7
+  0.6, 0.65, 0.7,
+  0.75, 0.8,
 ]
 
 @dataclass(frozen=True)
@@ -51,29 +43,7 @@ class RunSpec:
   epochs: int
   seed: int
 
-def parse_layer_sets_arg(raw: str) -> list[list[str]]:
-  try:
-    layer_sets = json.loads(raw)
-  except json.JSONDecodeError as exc:
-    raise argparse.ArgumentTypeError(f"invalid JSON for --layer_sets: {exc}") from exc
-
-  if not isinstance(layer_sets, list):
-    raise argparse.ArgumentTypeError("--layer_sets must be a JSON list of layer lists")
-
-  for layer_group in layer_sets:
-    if not isinstance(layer_group, list) or any(not isinstance(layer_name, str) for layer_name in layer_group):
-      raise argparse.ArgumentTypeError("--layer_sets must be a JSON list of string lists")
-
-  return layer_sets
-
 def format_layer_set(layer_names: list[str]) -> str: return json.dumps(layer_names)
-
-def parse_prune_method_arg(raw: str) -> str:
-  prune_method = prune_method_aliases.get(raw)
-  if prune_method is None:
-    valid_methods = ", ".join(sorted(prune_method_aliases))
-    raise argparse.ArgumentTypeError(f"invalid prune method: {raw}. expected one of: {valid_methods}")
-  return prune_method
 
 def get_prunable_layer(model: nn.Module, layer_name: str) -> nn.Module:
   layer = dict(model.named_modules()).get(layer_name)
@@ -96,14 +66,6 @@ def lowest_score_indices(scores: torch.Tensor, amount: float) -> torch.Tensor:
   if prune_count == 0:
     return torch.empty(0, dtype=torch.long, device=scores.device)
   return torch.topk(scores, k=prune_count, largest=False).indices
-
-def conv2_output_shape(model: VIBNet) -> tuple[int, int, int]:
-  with torch.no_grad():
-    device = next(model.parameters()).device
-    x = torch.zeros(1, *input_shape, device=device)
-    x = model.pool(torch.tanh(model.conv1(x)))
-    x = model.pool(torch.tanh(model.conv2(x)))
-  return (x.shape[1], x.shape[2], x.shape[3])
 
 def weight_prune_layers(model: nn.Module, layer_names: list[str], amount: float) -> None:
   if amount <= 0:
@@ -152,87 +114,42 @@ def outgoing_prune_layers(model: VIBNet, layer_names: list[str], amount: float) 
   if amount <= 0:
     return
 
-  conv2_channels, conv2_height, conv2_width = conv2_output_shape(model)
-  conv2_flatten_block = conv2_height * conv2_width
-
   for layer_name in layer_names:
     module = get_prunable_layer(model, layer_name)
-    next_layer_specs = outgoing_layer_map.get(layer_name)
-    if next_layer_specs is None:
+    next_layer_spec = outgoing_layer_map.get(layer_name)
+    if layer_name not in outgoing_layer_map:
       raise ValueError(f"no outgoing layer mapping configured for: {layer_name}")
-    if not next_layer_specs:
+    if next_layer_spec is None:
       raise ValueError(f"layer has no outgoing layer to prune against: {layer_name}")
 
-    outgoing_weights = []
-    next_layers = []
-    for next_layer_name, edge_type in next_layer_specs:
-      next_layer = get_prunable_layer(model, next_layer_name)
-      next_layers.append((next_layer, edge_type))
+    next_layer_name, edge_type = next_layer_spec
+    next_layer = get_prunable_layer(model, next_layer_name)
 
-      if edge_type == "linear":
-        if not isinstance(next_layer, nn.Linear):
-          raise ValueError(f"expected linear next layer for {next_layer_name}")
-        if next_layer.weight.shape[1] != output_unit_count(module):
-          raise ValueError(
-            f"shape mismatch between {layer_name} outputs and {next_layer_name} inputs: "
-            f"{output_unit_count(module)} != {next_layer.weight.shape[1]}"
-          )
-        outgoing_weights.append(next_layer.weight.detach().abs().transpose(0, 1))
-        continue
-
-      if edge_type == "latent_linear":
-        if layer_name != "fc_mu_logvar" or not isinstance(next_layer, nn.Linear):
-          raise ValueError(f"unsupported latent-linear mapping: {layer_name} -> {next_layer_name}")
-        outgoing_weights.append(next_layer.weight.detach().abs().transpose(0, 1))
-        continue
-
-      if edge_type == "conv":
-        if not isinstance(next_layer, nn.Conv2d):
-          raise ValueError(f"expected conv next layer for {next_layer_name}")
-        if next_layer.weight.shape[1] != output_unit_count(module):
-          raise ValueError(
-            f"shape mismatch between {layer_name} outputs and {next_layer_name} inputs: "
-            f"{output_unit_count(module)} != {next_layer.weight.shape[1]}"
-          )
-        outgoing_weights.append(next_layer.weight.detach().abs().permute(1, 0, 2, 3).reshape(next_layer.weight.shape[1], -1))
-        continue
-
-      if edge_type == "conv_flatten_linear":
-        if layer_name != "conv2" or not isinstance(next_layer, nn.Linear):
-          raise ValueError(f"unsupported conv-flatten-linear mapping: {layer_name} -> {next_layer_name}")
-        if output_unit_count(module) != conv2_channels:
-          raise ValueError(f"unexpected conv2 channel count: {output_unit_count(module)} != {conv2_channels}")
-        expected_input_dim = conv2_channels * conv2_flatten_block
-        if next_layer.weight.shape[1] != expected_input_dim:
-          raise ValueError(
-            f"shape mismatch between {layer_name} outputs and {next_layer_name} inputs: "
-            f"{expected_input_dim} != {next_layer.weight.shape[1]}"
-          )
-        reshaped = next_layer.weight.detach().abs().reshape(next_layer.weight.shape[0], conv2_channels, conv2_height, conv2_width)
-        outgoing_weights.append(reshaped.permute(1, 0, 2, 3).reshape(conv2_channels, -1))
-        continue
-
+    if edge_type == "linear":
+      if not isinstance(next_layer, nn.Linear):
+        raise ValueError(f"expected linear next layer for {next_layer_name}")
+      if next_layer.weight.shape[1] != output_unit_count(module):
+        raise ValueError(
+          f"shape mismatch between {layer_name} outputs and {next_layer_name} inputs: "
+          f"{output_unit_count(module)} != {next_layer.weight.shape[1]}"
+        )
+      scores = next_layer.weight.detach().abs().mean(dim=0)
+    elif edge_type == "latent_linear":
+      if layer_name != "fc_mu_logvar" or not isinstance(next_layer, nn.Linear):
+        raise ValueError(f"unsupported latent-linear mapping: {layer_name} -> {next_layer_name}")
+      scores = next_layer.weight.detach().abs().mean(dim=0)
+    else:
       raise ValueError(f"unsupported outgoing edge type: {edge_type}")
 
-    scores = torch.cat(outgoing_weights, dim=1).mean(dim=1)
     prune_idx = lowest_score_indices(scores, amount)
     if prune_idx.numel() == 0:
       continue
 
     with torch.no_grad():
-      for next_layer, edge_type in next_layers:
-        if edge_type == "linear":
-          next_layer.weight[:, prune_idx] = 0
-        elif edge_type == "latent_linear":
-          next_layer.weight[:, prune_idx] = 0
-        elif edge_type == "conv":
-          next_layer.weight[:, prune_idx, :, :] = 0
-        elif edge_type == "conv_flatten_linear":
-          block_offsets = torch.arange(conv2_flatten_block, device=prune_idx.device)
-          flatten_idx = (prune_idx.unsqueeze(1) * conv2_flatten_block + block_offsets.unsqueeze(0)).reshape(-1)
-          next_layer.weight[:, flatten_idx] = 0
-        else:
-          raise ValueError(f"unsupported outgoing edge type: {edge_type}")
+      if edge_type in ("linear", "latent_linear"):
+        next_layer.weight[:, prune_idx] = 0
+      else:
+        raise ValueError(f"unsupported outgoing edge type: {edge_type}")
 
 def prune_layers(model: VIBNet, layer_names: list[str], amount: float, prune_method: str) -> None:
   if prune_method == "weight":
@@ -331,7 +248,7 @@ def evaluate_pruning_curve(
     "accuracies": accs,
   }
 
-def build_report(save_root: str, data_dir: str, prune_method: str, layer_sets: list[list[str]]) -> dict[str, object]:
+def build_report(save_root: str, data_dir: str, prune_method: str) -> dict[str, object]:
   runs = parse_all_run_specs(save_root)
   if not runs:
     raise RuntimeError(f"no vib_cnn_* runs found in {save_root}")
@@ -354,7 +271,7 @@ def build_report(save_root: str, data_dir: str, prune_method: str, layer_sets: l
     )
 
     layer_results = []
-    for layer_names in layer_sets:
+    for layer_names in prune_layer_sets:
       print(f"  layers={format_layer_set(layer_names)}")
       curves = []
       for run in config_runs:
@@ -379,7 +296,7 @@ def build_report(save_root: str, data_dir: str, prune_method: str, layer_sets: l
     "data_dir": os.path.abspath(data_dir),
     "prune_method": prune_method,
     "prune_percents": prune_percents,
-    "layer_sets": layer_sets,
+    "layer_sets": prune_layer_sets,
     "generated_at": datetime.now(timezone.utc).isoformat(),
     "config_count": len(configs),
     "run_count": len(runs),
@@ -390,18 +307,6 @@ def parse_args() -> argparse.Namespace:
   parser = argparse.ArgumentParser(description="inspect cnn pruning stability across an entire save root")
   parser.add_argument("--save_root", type=str, required=True, help="directory containing saved model runs")
   parser.add_argument("--data_dir", type=str, default="data/CIFAR-10/", help="cifar-10 dataset path")
-  parser.add_argument(
-    "--prune_method",
-    type=parse_prune_method_arg,
-    default="weight",
-    help="pruning strategy to apply to each target layer: weight, incoming, outgoing",
-  )
-  parser.add_argument(
-    "--layer_sets",
-    type=parse_layer_sets_arg,
-    default=default_prune_layer_sets,
-    help='JSON nested list of layers to prune, e.g. [["fc_mu_logvar", "fc2"], ["fc2"]]',
-  )
   return parser.parse_args()
 
 if __name__ == "__main__":
@@ -411,9 +316,10 @@ if __name__ == "__main__":
   if not os.path.isdir(args.data_dir):
     raise RuntimeError(f"data_dir does not exist or is not a directory: {args.data_dir}")
 
-  report = build_report(args.save_root, args.data_dir, args.prune_method, args.layer_sets)
-
-  json_path = os.path.join(args.save_root, f"cnn_pruning_report_{args.prune_method}.json")
-  with open(json_path, "w", encoding="utf-8") as f:
-    json.dump(report, f, indent=2)
-  print(f"\njson saved to: {json_path}")
+  for prune_method in prune_methods:
+    print(f"\nprune_method={prune_method}")
+    report = build_report(args.save_root, args.data_dir, prune_method)
+    json_path = os.path.join(args.save_root, f"cnn_pruning_report_{prune_method}.json")
+    with open(json_path, "w", encoding="utf-8") as f:
+      json.dump(report, f, indent=2)
+    print(f"\njson saved to: {json_path}")
