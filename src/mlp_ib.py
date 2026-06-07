@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 from dataclasses import dataclass
 from typing import Tuple
-import os, json, argparse, sys
+import os, json, argparse, sys, random
+import numpy as np
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
@@ -10,6 +11,19 @@ from tqdm import tqdm
 parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, parent_dir)
 from msc import get_device, FashionMnistIdxDataset
+
+def seed_everything(seed: int) -> None:
+  random.seed(seed)
+  np.random.seed(seed % (2**32))
+  torch.manual_seed(seed)
+  if torch.cuda.is_available(): torch.cuda.manual_seed_all(seed)
+  torch.backends.cudnn.deterministic = True
+  torch.backends.cudnn.benchmark = False
+
+def seed_worker(worker_id: int) -> None:
+  worker_seed = torch.initial_seed() % (2**32)
+  random.seed(worker_seed)
+  np.random.seed(worker_seed)
 
 @dataclass
 class VIBMLPParams:
@@ -24,15 +38,22 @@ class VIBMLPParams:
   rnd_seed: int
 
   @classmethod
-  def from_args(cls, args: argparse.Namespace, device: torch.device):
+  def from_args(
+    cls,
+    args: argparse.Namespace,
+    device: torch.device,
+    epochs: int,
+    batch_size: int,
+    learning_rate: float,
+  ):
     return cls(
       beta=args.beta,
       z_dim=args.z_dim,
       hidden1=args.hidden1,
       hidden2=args.hidden2,
-      lr=args.lr,
-      batch_size=args.batch_size,
-      epochs=args.epochs,
+      lr=learning_rate,
+      batch_size=batch_size,
+      epochs=epochs,
       device=device,
       rnd_seed=args.rnd_seed,
     )
@@ -112,7 +133,7 @@ class VIBMLP(nn.Module):
   def forward(self, x: torch.Tensor):
     x_flat = x.view(x.size(0), -1)
     mu, sigma = self.encode(x_flat)
-    z = self.reparameterize(mu, sigma)
+    z = self.reparameterize(mu, sigma) if self.training else mu
     logits = self.decode(z)
     return logits, mu, sigma
 
@@ -147,7 +168,7 @@ def train_epoch(
 
   ce_sum, correct, num_examples = 0.0, 0, 0
 
-  for X, Y in (tq := tqdm(dataloader, desc="training", leave=False)):
+  for X, Y in tqdm(dataloader, desc="training", leave=False):
     X, Y = X.to(device), Y.to(device)
     optimizer.zero_grad()
 
@@ -198,22 +219,22 @@ def print_epoch(epoch, epochs, beta, train_ce_loss, train_acc, test_ce_loss, tes
   )
 
 if __name__ == "__main__":
+  epochs = 300
+  batch_size = 128
+  learning_rate = 2e-4
+
   parser = argparse.ArgumentParser(description="mlp vib training with configurable hyperparameters.")
   parser.add_argument("--beta", type=float, required=True, help="beta coefficient")
   parser.add_argument("--z_dim", type=int, required=True, help="latent dimension size")
   parser.add_argument("--hidden1", type=int, required=True, help="size of first hidden layer")
   parser.add_argument("--hidden2", type=int, required=True, help="size of second hidden layer")
-  parser.add_argument("--lr", type=float, default=2e-4, help="learning rate")
-  parser.add_argument("--epochs", type=int, default=300, help="number of training epochs")
-  parser.add_argument("--rnd_seed", type=int, default=42, help="torch manual seed (default: 42)")
-  parser.add_argument("--batch_size", type=int, default=128, help="batch size")
+  parser.add_argument("--rnd_seed", type=int, required=True, help="random seed")
   args = parser.parse_args()
   device = get_device()
-  params = VIBMLPParams.from_args(args, device)
+  params = VIBMLPParams.from_args(args, device, epochs, batch_size, learning_rate)
   print(params)
 
-  torch.manual_seed(params.rnd_seed)
-  if torch.cuda.is_available(): torch.cuda.manual_seed(params.rnd_seed)
+  seed_everything(params.rnd_seed)
 
   # ----
   num_workers = min(4, os.cpu_count() or 0)
@@ -222,6 +243,8 @@ if __name__ == "__main__":
     "batch_size": params.batch_size,
     "num_workers": num_workers,
     "pin_memory": pin_memory,
+    "worker_init_fn": seed_worker,
+    "generator": torch.Generator().manual_seed(params.rnd_seed),
   }
   if num_workers > 0: loader_kwargs["persistent_workers"] = True
 
@@ -237,13 +260,13 @@ if __name__ == "__main__":
 
   train_ce_losses, train_accs, test_ce_losses, test_accs = [], [], [], []
 
-  for epoch in range(args.epochs):
+  for epoch in range(params.epochs):
     train_ce_loss, train_acc = train_epoch(model, train_loader, optimizer, beta=args.beta)
 
-    if epoch % 10 == 0 and epoch != args.epochs - 1:
+    if epoch % 10 == 0 and epoch != params.epochs - 1:
       test_ce_loss, test_acc = evaluate_epoch(model, test_loader, beta=args.beta)
 
-      print_epoch(epoch, args.epochs, args.beta, train_ce_loss, train_acc, test_ce_loss, test_acc)
+      print_epoch(epoch, params.epochs, args.beta, train_ce_loss, train_acc, test_ce_loss, test_acc)
 
       train_ce_losses.append(train_ce_loss); train_accs.append(train_acc)
       test_ce_losses.append(test_ce_loss); test_accs.append(test_acc)
