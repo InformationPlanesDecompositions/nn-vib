@@ -49,7 +49,7 @@ class VIBCNNParams:
     )
 
   def save_dir(self) -> str:
-    s = f"save_stats_weights/{self.file_name()}"
+    s = f"../SaveStatsWeights/{self.file_name()}"
     os.makedirs(s, exist_ok=True)
     return f"{s}/{self.file_name()}"
 
@@ -110,8 +110,7 @@ class VIBNet(nn.Module):
       flat_dim = self._forward_features(dummy).shape[1]
 
     self.fc1 = nn.Linear(flat_dim, 120)
-    self.fc_mu = nn.Linear(120, z_dim)
-    self.fc_logvar = nn.Linear(120, z_dim)
+    self.fc_mu_logvar = nn.Linear(120, 2 * z_dim)
     self.fc2 = nn.Linear(z_dim, decoder_hidden)
     self.fc_decode = nn.Linear(decoder_hidden, output_shape)
 
@@ -125,8 +124,7 @@ class VIBNet(nn.Module):
     h = torch.tanh(
       self.fc1(self._forward_features(x))
     )
-    mu = self.fc_mu(h)
-    logvar = self.fc_logvar(h)
+    mu, logvar = torch.chunk(self.fc_mu_logvar(h), 2, dim=1)
     logvar = torch.clamp(logvar, min=-10.0, max=2.0)
     sigma = torch.exp(0.5 * logvar)
     return mu, sigma

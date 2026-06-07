@@ -20,7 +20,7 @@ source "$script_dir/.venv/bin/activate"
 betas=(0.1 0.05 0.01 0.005 0.001 0.0005 0.0001 0.00005 0.0)
 
 for beta in "${betas[@]}"; do
-  python3 "$script_dir/src/cnn/cnn_ib.py" \
+  python3 "$script_dir/src/cnn_ib.py" \
     --rnd_seed "$rnd_seed" \
     --beta "$beta" \
     --z_dim "$z_dim" \

@@ -14,7 +14,7 @@ output_shape = 10
 batch_size = 512
 
 # pruning experiment config
-default_prune_layer_sets = [["fc_mu", "fc_logvar", "fc2"], ["fc2"]]
+default_prune_layer_sets = [["fc_mu_logvar", "fc2"], ["fc2"]]
 prune_method_aliases = {
   "weight": "weight",
   "incoming": "incoming",
@@ -25,9 +25,8 @@ prune_method_aliases = {
 outgoing_layer_map = {
   "conv1": [("conv2", "conv")],
   "conv2": [("fc1", "conv_flatten_linear")],
-  "fc1": [("fc_mu", "linear"), ("fc_logvar", "linear")],
-  "fc_mu": [("fc2", "linear")],
-  "fc_logvar": [("fc2", "linear")],
+  "fc1": [("fc_mu_logvar", "linear")],
+  "fc_mu_logvar": [("fc2", "latent_linear")],
   "fc2": [("fc_decode", "linear")],
   "fc_decode": [],
 }
@@ -181,6 +180,12 @@ def outgoing_prune_layers(model: VIBNet, layer_names: list[str], amount: float) 
         outgoing_weights.append(next_layer.weight.detach().abs().transpose(0, 1))
         continue
 
+      if edge_type == "latent_linear":
+        if layer_name != "fc_mu_logvar" or not isinstance(next_layer, nn.Linear):
+          raise ValueError(f"unsupported latent-linear mapping: {layer_name} -> {next_layer_name}")
+        outgoing_weights.append(next_layer.weight.detach().abs().transpose(0, 1))
+        continue
+
       if edge_type == "conv":
         if not isinstance(next_layer, nn.Conv2d):
           raise ValueError(f"expected conv next layer for {next_layer_name}")
@@ -217,6 +222,8 @@ def outgoing_prune_layers(model: VIBNet, layer_names: list[str], amount: float) 
     with torch.no_grad():
       for next_layer, edge_type in next_layers:
         if edge_type == "linear":
+          next_layer.weight[:, prune_idx] = 0
+        elif edge_type == "latent_linear":
           next_layer.weight[:, prune_idx] = 0
         elif edge_type == "conv":
           next_layer.weight[:, prune_idx, :, :] = 0
@@ -393,7 +400,7 @@ def parse_args() -> argparse.Namespace:
     "--layer_sets",
     type=parse_layer_sets_arg,
     default=default_prune_layer_sets,
-    help='JSON nested list of layers to prune, e.g. [["fc_mu", "fc_logvar", "fc2"], ["fc2"]]',
+    help='JSON nested list of layers to prune, e.g. [["fc_mu_logvar", "fc2"], ["fc2"]]',
   )
   return parser.parse_args()
 

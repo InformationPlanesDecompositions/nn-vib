@@ -16,7 +16,7 @@ plt.rcParams["xtick.labelsize"] = 16
 plt.rcParams["ytick.labelsize"] = 16
 plt.rcParams["legend.fontsize"] = 13
 
-default_plots_dir = "plots"
+default_plots_dir = "../Plots"
 beta_zero = 0.0
 metric_choices = ["loss", "acc"]
 
@@ -180,7 +180,7 @@ def plot_aggregate_page(
   output_dir: str,
 ) -> str:
   fig, ax = plt.subplots(figsize=(10, 6), constrained_layout=True)
-  xs = np.asarray(prune_percents, dtype=np.float64) * 100.0
+  xs = np.asarray(prune_percents, dtype=np.float64)
   aggregate_samples = aggregate_beta_samples(config_items)
 
   for beta, curves in filtered_beta_items(aggregate_samples):

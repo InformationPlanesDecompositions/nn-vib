@@ -16,7 +16,7 @@ plt.rcParams["xtick.labelsize"] = 16
 plt.rcParams["ytick.labelsize"] = 16
 plt.rcParams["legend.fontsize"] = 13
 
-default_plots_dir = "plots"
+default_plots_dir = "../Plots"
 beta_zero = 0.0
 metric_choices = ["loss", "acc"]
 

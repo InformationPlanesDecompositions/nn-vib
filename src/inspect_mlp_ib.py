@@ -14,7 +14,7 @@ output_shape = 10
 batch_size = 128
 
 # pruning experiment config
-default_prune_layer_sets = [["fc_mu", "fc_logvar", "fc2"], ["fc2"]]
+default_prune_layer_sets = [["fc_mu_logvar", "fc2"], ["fc2"]]
 prune_method_aliases = {
   "weight": "weight",
   "incoming": "incoming",
@@ -23,9 +23,8 @@ prune_method_aliases = {
   "out-going": "outgoing",
 }
 outgoing_layer_map = {
-  "fc1": ["fc_mu", "fc_logvar"],
-  "fc_mu": ["fc2"],
-  "fc_logvar": ["fc2"],
+  "fc1": ["fc_mu_logvar"],
+  "fc_mu_logvar": ["fc2"],
   "fc2": ["fc_decode"],
   "fc_decode": [],
 }
@@ -140,6 +139,10 @@ def outgoing_prune_layers(model: nn.Module, layer_names: list[str], amount: floa
     next_layers = []
     for next_layer_name in next_layer_names:
       next_layer = get_linear_layer(model, next_layer_name)
+      if layer_name == "fc_mu_logvar" and next_layer_name == "fc2":
+        next_layers.append(next_layer)
+        outgoing_weights.append(next_layer.weight.detach().abs().transpose(0, 1))
+        continue
       if next_layer.weight.shape[1] != module.weight.shape[0]:
         raise ValueError(
           f"shape mismatch between {layer_name} outputs and {next_layer_name} inputs: "
@@ -313,7 +316,7 @@ def parse_args() -> argparse.Namespace:
     "--layer_sets",
     type=parse_layer_sets_arg,
     default=default_prune_layer_sets,
-    help='JSON nested list of layers to prune, e.g. [["fc_mu", "fc_logvar", "fc2"], ["fc2"]]',
+    help='JSON nested list of layers to prune, e.g. [["fc_mu_logvar", "fc2"], ["fc2"]]',
   )
   return parser.parse_args()
 

@@ -11,18 +11,6 @@ parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, parent_dir)
 from msc import get_device, FashionMnistIdxDataset
 
-# rnd_seeds: [2136623168, 3824702233, 416282721, 3991408081]
-# betas:     [0.5, 0.4, 0.3, 0.2, 0.1, 0.01, 0.001, 0.0001]
-# epochs:    300
-# lr:        2e-4
-# models:
-#   512 -> 10 -> 128
-#   386 -> 15 -> 128
-#   256 -> 10 -> 64
-#   512 -> 4 -> 128
-#   386 -> 8 -> 128
-#   256 -> 4 -> 64
-
 @dataclass
 class VIBMLPParams:
   beta: float
@@ -53,7 +41,7 @@ class VIBMLPParams:
     return f"vib_mlp_{self.hidden1}_{self.hidden2}_{self.z_dim}_{self.beta}_{self.lr}_{self.epochs}_{self.rnd_seed}"
 
   def save_dir(self) -> str:
-    s = f"save_stats_weights/{self.file_name()}"
+    s = f"../SaveStatsWeights/{self.file_name()}"
     os.makedirs(s, exist_ok=True)
     return f"{s}/{self.file_name()}"
 
@@ -101,15 +89,13 @@ class VIBMLP(nn.Module):
   ):
     super().__init__()
     self.fc1 = nn.Linear(input_shape, hidden1)
-    self.fc_mu = nn.Linear(hidden1, z_dim)
-    self.fc_logvar = nn.Linear(hidden1, z_dim)
+    self.fc_mu_logvar = nn.Linear(hidden1, 2 * z_dim)
     self.fc2 = nn.Linear(z_dim, hidden2)
     self.fc_decode = nn.Linear(hidden2, output_shape)
 
   def encode(self, x: torch.Tensor):
     h = F.relu(self.fc1(x))
-    mu = self.fc_mu(h)
-    logvar = self.fc_logvar(h)
+    mu, logvar = torch.chunk(self.fc_mu_logvar(h), 2, dim=1)
     logvar = torch.clamp(logvar, min=-10.0, max=2.0)
     sigma = torch.exp(0.5 * logvar)
     return mu, sigma
