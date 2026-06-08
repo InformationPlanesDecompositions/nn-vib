@@ -121,7 +121,7 @@ def plot_page(
   page_count: int,
   beta_labels: str,
 ) -> str:
-  fig, axes = plt.subplots(2, 3)
+  fig, axes = plt.subplots(2, 3, figsize=(18, 10), constrained_layout=True)
   axes_list = list(axes.flat)
   xs = np.asarray(prune_percents, dtype=np.float64)
   cmap, norm = None, None
@@ -139,6 +139,7 @@ def plot_page(
     ax.set_title(model_config_label(config_key))
     ax.set_xlabel("Pruning fraction")
     ax.set_ylabel("Accuracy robustness")
+    ax.grid(True)
     if beta_labels == "table":
       ax.legend()
 
@@ -161,7 +162,7 @@ def plot_aggregate_page(
   output_dir: str,
   beta_labels: str,
 ) -> str:
-  fig, ax = plt.subplots()
+  fig, ax = plt.subplots(figsize=(10, 6), constrained_layout=True)
   xs = np.asarray(prune_percents, dtype=np.float64)
   aggregate_samples = aggregate_beta_samples(config_items)
   cmap, norm = None, None
@@ -178,6 +179,7 @@ def plot_aggregate_page(
 
   ax.set_xlabel("Pruning fraction")
   ax.set_ylabel("Accuracy robustness")
+  ax.grid(True)
   if beta_labels == "table":
     ax.legend()
 
@@ -192,7 +194,7 @@ def parse_args() -> argparse.Namespace:
   parser = argparse.ArgumentParser(description="plot aggregated cnn pruning robustness from a json report")
   parser.add_argument("--input_json", type=str, required=True, help="json report produced by inspect_cnn_ib.py")
   parser.add_argument("--plots_dir", type=str, default=default_plots_dir, help="directory to save plots into")
-  parser.add_argument("--beta_labels", choices=beta_label_choices, default="table", help="label beta lines with a table or colorbar")
+  parser.add_argument("--beta_labels", choices=beta_label_choices, default="colorbar", help="label beta lines with a table or colorbar")
   return parser.parse_args()
 
 
