@@ -11,14 +11,9 @@ if "MPLBACKEND" not in os.environ: matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-plt.rcParams["axes.labelsize"] = 16
-plt.rcParams["xtick.labelsize"] = 16
-plt.rcParams["ytick.labelsize"] = 16
-plt.rcParams["legend.fontsize"] = 13
-
 default_plots_dir = "../Plots"
 beta_zero = 0.0
-metric_choices = ["loss", "acc"]
+beta_label_choices = ["table", "colorbar"]
 
 def safe_float_str(value: float) -> str: return format(value, "g").replace("-", "m").replace(".", "p")
 
@@ -37,12 +32,6 @@ def model_config_label(config_key: tuple[object, ...]) -> str:
   hidden1, hidden2, z_dim, lr, epochs = config_key
   return f"h1={hidden1} h2={hidden2} z={z_dim}\nlr={float(lr):g} epochs={epochs}"
 
-def loss_robustness_curve(reference_values: list[float], values: list[float]) -> np.ndarray:
-  eps = 1e-8
-  reference = np.asarray(reference_values, dtype=np.float64)
-  arr = np.asarray(values, dtype=np.float64)
-  return reference / np.clip(arr, eps, None)
-
 def accuracy_robustness_curve(reference_values: list[float], values: list[float]) -> np.ndarray:
   eps = 1e-8
   reference = np.asarray(reference_values, dtype=np.float64)
@@ -57,15 +46,19 @@ def summarize_curves(curves: list[np.ndarray]) -> tuple[np.ndarray, np.ndarray]:
   stderr = stacked.std(axis=0, ddof=1) / math.sqrt(stacked.shape[0])
   return mean, stderr
 
-def metric_ylabel(metric: str) -> str:
-  if metric == "loss":
-    return "Robustness" #(L(i,0,p) / L(i,beta,p))
-  if metric == "acc":
-    return "Accuracy robustness" #(Acc(i,beta,p) / Acc(i,0,p))
-  raise ValueError(f"unknown metric: {metric}")
-
 def filtered_beta_items(beta_samples: dict[float, list[np.ndarray]]) -> list[tuple[float, list[np.ndarray]]]:
   return [(beta, beta_samples[beta]) for beta in sorted(beta_samples)]
+
+def beta_bounds(config_items: list[tuple[tuple[object, ...], dict[float, list[np.ndarray]]]]) -> tuple[float, float]:
+  betas = [beta for _, beta_samples in config_items for beta in beta_samples]
+  return min(betas), max(betas)
+
+def add_beta_colorbar(fig, axes, beta_min: float, beta_max: float) -> tuple[object, object]:
+  cmap = plt.get_cmap("RdYlGn_r")
+  norm = matplotlib.colors.Normalize(vmin=beta_min, vmax=beta_max)
+  scalar_map = plt.cm.ScalarMappable(norm=norm, cmap=cmap)
+  fig.colorbar(scalar_map, ax=axes, label="beta", ticks=[beta_min, beta_max])
+  return cmap, norm
 
 def aggregate_beta_samples(
   config_items: list[tuple[tuple[object, ...], dict[float, list[np.ndarray]]]],
@@ -79,7 +72,6 @@ def aggregate_beta_samples(
 
 def build_samples(
   report: dict[str, object],
-  metric: str,
 ) -> tuple[
   dict[tuple[str, ...], dict[tuple[object, ...], dict[float, list[np.ndarray]]]],
   dict[tuple[str, ...], list[float]],
@@ -98,15 +90,9 @@ def build_samples(
         None,
       )
       if beta_zero_curve is None:
-        if metric == "loss":
-          raise ValueError(
-            f"missing beta=0 curve for config {config_key} and method {method_key}; cannot compute L(i,0,p)/L(i,beta,p)"
-          )
-        if metric == "acc":
-          raise ValueError(
-            f"missing beta=0 curve for config {config_key} and method {method_key}; cannot compute Acc(i,beta,p)/Acc(i,0,p)"
-          )
-        raise ValueError(f"unknown metric: {metric}")
+        raise ValueError(
+          f"missing beta=0 curve for config {config_key} and method {method_key}; cannot compute Acc(i,beta,p)/Acc(i,0,p)"
+        )
 
       for curve in layer_result["curves"]:
         prune_percents = curve["prune_percents"]
@@ -116,12 +102,7 @@ def build_samples(
         elif existing != prune_percents:
           raise ValueError(f"inconsistent prune percents for method {method_key}")
 
-        if metric == "loss":
-          normalized = loss_robustness_curve(beta_zero_curve["losses"], curve["losses"])
-        elif metric == "acc":
-          normalized = accuracy_robustness_curve(beta_zero_curve["accuracies"], curve["accuracies"])
-        else:
-          raise ValueError(f"unknown metric: {metric}")
+        normalized = accuracy_robustness_curve(beta_zero_curve["accuracies"], curve["accuracies"])
 
         beta = float(curve["beta"])
         panel_samples[method_key][config_key][beta].append(normalized)
@@ -133,38 +114,39 @@ def plot_page(
   config_items: list[tuple[tuple[object, ...], dict[float, list[np.ndarray]]]],
   prune_percents: list[float],
   prune_method: str,
-  metric: str,
   output_dir: str,
   page_index: int,
   page_count: int,
+  beta_labels: str,
 ) -> str:
-  fig, axes = plt.subplots(2, 3, figsize=(18, 10), constrained_layout=True)
+  fig, axes = plt.subplots(2, 3)
   axes_list = list(axes.flat)
   xs = np.asarray(prune_percents, dtype=np.float64)
+  cmap, norm = None, None
+  if beta_labels == "colorbar":
+    beta_min, beta_max = beta_bounds(config_items)
+    cmap, norm = add_beta_colorbar(fig, axes_list[:len(config_items)], beta_min, beta_max)
 
   for ax, (config_key, beta_samples) in zip(axes_list, config_items):
     for beta, curves in filtered_beta_items(beta_samples):
       mean, stderr = summarize_curves(curves)
-      ax.plot(xs, mean, marker="o", linewidth=1.8, label=f"beta={beta:g}")
-      ax.fill_between(xs, mean - stderr, mean + stderr, alpha=0.2)
+      if beta_labels == "colorbar":
+        ax.plot(xs, mean, color=cmap(norm(beta)))
+      else:
+        ax.plot(xs, mean, label=f"beta={beta:g}")
     ax.set_title(model_config_label(config_key))
     ax.set_xlabel("Pruning fraction")
-    ax.set_ylabel(metric_ylabel(metric))
-    ax.grid(True, alpha=0.3)
-    ax.legend(framealpha=0.4, fontsize=9)
+    ax.set_ylabel("Accuracy robustness")
+    if beta_labels == "table":
+      ax.legend()
 
   for ax in axes_list[len(config_items) :]:
     ax.axis("off")
 
-  #fig.suptitle(
-  #  f"MLP pruning | method={prune_method} | pruned: {', '.join(method_key)} | page {page_index}/{page_count} | {metric}",
-  #  fontsize=16,
-  #)
-
   page_suffix = "" if page_count == 1 else f"_part_{page_index}"
-  save_name = f"mlp_pruning_{prune_method}_{layer_key(list(method_key))}{page_suffix}_{metric}.png"
+  save_name = f"mlp_pruning_{prune_method}_{layer_key(list(method_key))}{page_suffix}_acc.png"
   save_path = os.path.join(output_dir, save_name)
-  fig.savefig(save_path, dpi=250, bbox_inches="tight")
+  fig.savefig(save_path)
   plt.close(fig)
   return save_path
 
@@ -173,32 +155,32 @@ def plot_aggregate_page(
   config_items: list[tuple[tuple[object, ...], dict[float, list[np.ndarray]]]],
   prune_percents: list[float],
   prune_method: str,
-  metric: str,
   output_dir: str,
+  beta_labels: str,
 ) -> str:
-  fig, ax = plt.subplots(figsize=(10, 6), constrained_layout=True)
+  fig, ax = plt.subplots()
   xs = np.asarray(prune_percents, dtype=np.float64)
   aggregate_samples = aggregate_beta_samples(config_items)
+  cmap, norm = None, None
+  if beta_labels == "colorbar":
+    beta_min, beta_max = min(aggregate_samples), max(aggregate_samples)
+    cmap, norm = add_beta_colorbar(fig, ax, beta_min, beta_max)
 
   for beta, curves in filtered_beta_items(aggregate_samples):
     mean, stderr = summarize_curves(curves)
-    ax.plot(xs, mean, marker="o", linewidth=2.0, label=f"beta={beta:g}")
-    ax.fill_between(xs, mean - stderr, mean + stderr, alpha=0.2)
+    if beta_labels == "colorbar":
+      ax.plot(xs, mean, color=cmap(norm(beta)))
+    else:
+      ax.plot(xs, mean, label=f"beta={beta:g}")
 
   ax.set_xlabel("Pruning fraction")
-  ax.set_ylabel(metric_ylabel(metric))
-  #ax.set_title(f"Average over model sizes | pruned: {', '.join(method_key)}")
-  ax.grid(True, alpha=0.3)
-  ax.legend(framealpha=0.4)
+  ax.set_ylabel("Accuracy robustness")
+  if beta_labels == "table":
+    ax.legend()
 
-  #fig.suptitle(
-  #  f"MLP pruning aggregate | method={prune_method} | {metric}",
-  #  fontsize=16,
-  #)
-
-  save_name = f"mlp_pruning_{prune_method}_{layer_key(list(method_key))}_aggregate_{metric}.png"
+  save_name = f"mlp_pruning_{prune_method}_{layer_key(list(method_key))}_aggregate_acc.png"
   save_path = os.path.join(output_dir, save_name)
-  fig.savefig(save_path, dpi=250, bbox_inches="tight")
+  fig.savefig(save_path)
   plt.close(fig)
   return save_path
 
@@ -206,7 +188,7 @@ def parse_args() -> argparse.Namespace:
   parser = argparse.ArgumentParser(description="plot aggregated mlp pruning robustness from a json report")
   parser.add_argument("--input_json", type=str, required=True, help="json report produced by inspect_mlp_ib.py")
   parser.add_argument("--plots_dir", type=str, default=default_plots_dir, help="directory to save plots into")
-  parser.add_argument("--metric", choices=metric_choices, default="loss", help="plot robustness from losses or accuracies")
+  parser.add_argument("--beta_labels", choices=beta_label_choices, default="table", help="label beta lines with a table or colorbar")
   return parser.parse_args()
 
 if __name__ == "__main__":
@@ -218,7 +200,7 @@ if __name__ == "__main__":
   plots_dir = args.plots_dir
   os.makedirs(plots_dir, exist_ok=True)
 
-  panel_samples, prune_percent_map = build_samples(report, args.metric)
+  panel_samples, prune_percent_map = build_samples(report)
 
   for method_key in sorted(panel_samples):
     sorted_config_items = sorted(panel_samples[method_key].items(), key=lambda item: item[0])
@@ -227,8 +209,8 @@ if __name__ == "__main__":
       sorted_config_items,
       prune_percent_map[method_key],
       prune_method,
-      args.metric,
       plots_dir,
+      args.beta_labels,
     )
     print(f"saved figure: {aggregate_path}")
     page_size = 6
@@ -241,9 +223,9 @@ if __name__ == "__main__":
         sorted_config_items[start:end],
         prune_percent_map[method_key],
         prune_method,
-        args.metric,
         plots_dir,
         page_idx + 1,
         page_count,
+        args.beta_labels,
       )
       print(f"saved figure: {save_path}")

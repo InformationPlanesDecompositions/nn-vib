@@ -14,7 +14,7 @@ output_shape = 10
 batch_size = 512
 
 # pruning experiment config
-prune_layer_sets = [["fc_mu_logvar", "fc2"], ["fc2"], ["fc2", "fc_decode"]]
+prune_layer_sets = [["fc2"]]
 prune_methods = ["incoming", "outgoing", "weight"]
 outgoing_layer_map = {
   "fc_mu_logvar": ("fc2", "latent_linear"),
