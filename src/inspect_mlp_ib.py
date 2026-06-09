@@ -14,8 +14,13 @@ output_shape = 10
 batch_size = 128
 
 # pruning experiment config
-prune_layer_sets = [["fc_mu_logvar", "fc2"]]
-prune_methods = ["incoming", "outgoing", "weight"]
+prune_layer_sets = [["fc2"]]
+prune_method_aliases = {
+  "incoming": "incoming",
+  "outgoing": "outgoing",
+  "weight": "weight",
+  "weights": "weight",
+}
 outgoing_layer_map = {
   "fc_mu_logvar": "fc2",
   "fc2": "fc_decode",
@@ -44,6 +49,13 @@ class RunSpec:
 
 def format_layer_set(layer_names: list[str]) -> str:
   return json.dumps(layer_names)
+
+def parse_prune_method_arg(raw: str) -> str:
+  prune_method = prune_method_aliases.get(raw)
+  if prune_method is None:
+    valid_methods = ", ".join(sorted(prune_method_aliases))
+    raise argparse.ArgumentTypeError(f"invalid prune method: {raw}. expected one of: {valid_methods}")
+  return prune_method
 
 def get_linear_layer(model: nn.Module, layer_name: str) -> nn.Linear:
   layer = dict(model.named_modules()).get(layer_name)
@@ -271,6 +283,7 @@ def build_report(save_root: str, prune_method: str) -> dict[str, object]:
 def parse_args() -> argparse.Namespace:
   parser = argparse.ArgumentParser(description="inspect mlp pruning stability across an entire save root")
   parser.add_argument("--save_root", type=str, required=True, help="directory containing saved model runs")
+  parser.add_argument("--prune_method", type=parse_prune_method_arg, required=True, help="pruning strategy: incoming, outgoing, weight, or weights")
   return parser.parse_args()
 
 if __name__ == "__main__":
@@ -278,9 +291,7 @@ if __name__ == "__main__":
   if not os.path.isdir(args.save_root):
     raise RuntimeError(f"save_root does not exist or is not a directory: {args.save_root}")
 
-  for prune_method in prune_methods:
-    print(f"\nprune_method={prune_method}")
-    report = build_report(args.save_root, prune_method)
-    json_path = os.path.join(args.save_root, f"mlp_pruning_report_{prune_method}.json")
-    with open(json_path, "w", encoding="utf-8") as f: json.dump(report, f, indent=2)
-    print(f"\njson saved to: {json_path}")
+  report = build_report(args.save_root, args.prune_method)
+  json_path = os.path.join(args.save_root, f"mlp_pruning_report_{args.prune_method}.json")
+  with open(json_path, "w", encoding="utf-8") as f: json.dump(report, f, indent=2)
+  print(f"\njson saved to: {json_path}")
