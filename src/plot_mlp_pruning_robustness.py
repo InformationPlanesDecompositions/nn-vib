@@ -14,6 +14,7 @@ import numpy as np
 default_plots_dir = "../Plots"
 beta_zero = 0.0
 beta_label_choices = ["table", "colorbar"]
+axis_label_fontsize = 14
 
 def safe_float_str(value: float) -> str: return format(value, "g").replace("-", "m").replace(".", "p")
 
@@ -135,8 +136,8 @@ def plot_page(
       else:
         ax.plot(xs, mean, label=f"beta={beta:g}")
     ax.set_title(model_config_label(config_key))
-    ax.set_xlabel("Pruning fraction")
-    ax.set_ylabel("Accuracy robustness")
+    ax.set_xlabel("Pruning fraction", fontsize=axis_label_fontsize)
+    ax.set_ylabel("Accuracy robustness", fontsize=axis_label_fontsize)
     ax.grid(True)
     if beta_labels == "table":
       ax.legend()
@@ -145,7 +146,7 @@ def plot_page(
     ax.axis("off")
 
   page_suffix = "" if page_count == 1 else f"_part_{page_index}"
-  save_name = f"mlp_pruning_{prune_method}_{layer_key(list(method_key))}{page_suffix}_acc.png"
+  save_name = f"mlp_pruning_{prune_method}_{layer_key(list(method_key))}{page_suffix}_acc.pdf"
   save_path = os.path.join(output_dir, save_name)
   fig.savefig(save_path)
   plt.close(fig)
@@ -174,13 +175,13 @@ def plot_aggregate_page(
     else:
       ax.plot(xs, mean, label=f"beta={beta:g}")
 
-  ax.set_xlabel("Pruning fraction")
-  ax.set_ylabel("Accuracy robustness")
+  ax.set_xlabel("Pruning fraction", fontsize=axis_label_fontsize)
+  ax.set_ylabel("Accuracy robustness", fontsize=axis_label_fontsize)
   ax.grid(True)
   if beta_labels == "table":
     ax.legend()
 
-  save_name = f"mlp_pruning_{prune_method}_{layer_key(list(method_key))}_aggregate_acc.png"
+  save_name = f"mlp_pruning_{prune_method}_{layer_key(list(method_key))}_aggregate_acc.pdf"
   save_path = os.path.join(output_dir, save_name)
   fig.savefig(save_path)
   plt.close(fig)
