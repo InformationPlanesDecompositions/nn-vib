@@ -50,9 +50,20 @@ def model_config_key(config: dict[str, object]) -> tuple[object, ...]:
 
 def model_config_label(config_key: tuple[object, ...]) -> str:
     hidden1, hidden2, decoder_hidden, z_dim, lr, epochs = config_key
-    return (
-        f"h1={hidden1} h2={hidden2} dec={decoder_hidden} z={z_dim}\n"
-        f"lr={float(lr):g} epochs={epochs}"
+    cnn_labels = {
+        (6, 16, 84, 10): "CNN1",
+        (6, 16, 84, 20): "CNN2",
+        (8, 18, 96, 10): "CNN3",
+        (8, 18, 96, 20): "CNN4",
+        (10, 20, 128, 10): "CNN5",
+        (10, 20, 128, 20): "CNN6",
+    }
+    return cnn_labels.get(
+        (int(hidden1), int(hidden2), int(decoder_hidden), int(z_dim)),
+        (
+            f"h1={hidden1} h2={hidden2} dec={decoder_hidden} z={z_dim}\n"
+            f"lr={float(lr):g} epochs={epochs}"
+        ),
     )
 
 
