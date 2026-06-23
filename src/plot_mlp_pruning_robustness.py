@@ -51,7 +51,18 @@ def model_config_key(config: dict[str, object]) -> tuple[object, ...]:
 
 def model_config_label(config_key: tuple[object, ...]) -> str:
     hidden1, hidden2, z_dim, lr, epochs = config_key
-    return f"h1={hidden1} h2={hidden2} z={z_dim}\nlr={float(lr):g} epochs={epochs}"
+    mlp_labels = {
+        (256, 64, 4): "MLP1",
+        (256, 64, 10): "MLP2",
+        (386, 96, 4): "MLP3",
+        (386, 96, 10): "MLP4",
+        (512, 128, 4): "MLP5",
+        (512, 128, 10): "MLP6",
+    }
+    return mlp_labels.get(
+        (int(hidden1), int(hidden2), int(z_dim)),
+        f"h1={hidden1} h2={hidden2} z={z_dim}\nlr={float(lr):g} epochs={epochs}",
+    )
 
 
 def accuracy_robustness_curve(

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 from dataclasses import dataclass
-from typing import Tuple
+from typing import List, Optional, Tuple
 import os, json, argparse, sys, random
 import numpy as np
 import torch
@@ -189,6 +189,7 @@ def train_epoch(
     dataloader: DataLoader,
     optimizer: optim.Optimizer,
     beta: float,
+    batch_ce_losses: Optional[List[float]] = None,
 ) -> Tuple[float, float]:
     model.train()
     device = next(model.parameters()).device
@@ -204,6 +205,9 @@ def train_epoch(
 
         loss.backward()
         optimizer.step()
+
+        if batch_ce_losses is not None:
+            batch_ce_losses.append(ce.item())
 
         batch_size = Y.size(0)
         ce_sum += ce.item() * batch_size
@@ -250,6 +254,14 @@ def print_epoch(epoch, epochs, beta, train_ce_loss, train_acc, test_ce_loss, tes
     )
 
 
+def save_ce_losses_json(ce_losses: List[float], save_path: str) -> None:
+    if not ce_losses:
+        return
+
+    with open(save_path, "w", encoding="utf-8") as json_file:
+        json.dump({"train_batch_ce_losses": ce_losses}, json_file, indent=2)
+
+
 if __name__ == "__main__":
     epochs = 300
     batch_size = 128
@@ -280,6 +292,12 @@ if __name__ == "__main__":
     parser.add_argument("--rnd_seed", type=int, required=True, help="random seed")
     parser.add_argument(
         "--data_dir", type=str, default="data/CIFAR-10/", help="dataset path"
+    )
+    parser.add_argument(
+        "--plot_ce_losses",
+        action="store_true",
+        default=False,
+        help="save per-batch training CE losses to JSON",
     )
     args = parser.parse_args()
     device = get_device()
@@ -329,10 +347,11 @@ if __name__ == "__main__":
     optimizer = optim.Adam(model.parameters(), lr=params.lr, betas=(0.5, 0.999))
 
     train_ce_losses, train_accs, test_ce_losses, test_accs = [], [], [], []
+    batch_ce_losses = [] if args.plot_ce_losses else None
 
     for epoch in range(params.epochs):
         train_ce_loss, train_acc = train_epoch(
-            model, train_loader, optimizer, beta=args.beta
+            model, train_loader, optimizer, beta=args.beta, batch_ce_losses=batch_ce_losses
         )
 
         if epoch % 10 == 0 and epoch != params.epochs - 1:
@@ -354,6 +373,11 @@ if __name__ == "__main__":
             test_accs.append(test_acc)
 
     torch.save(model.state_dict(), f"{params.save_dir()}.pth")
+
+    if batch_ce_losses is not None:
+        losses_path = f"{params.save_dir()}_train_ce_losses.json"
+        save_ce_losses_json(batch_ce_losses, losses_path)
+        print(f"saved CE losses: {losses_path}")
 
     final_test_ce_loss, final_test_acc = evaluate_epoch(
         model, test_loader, beta=args.beta
